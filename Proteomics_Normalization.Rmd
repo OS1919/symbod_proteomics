@@ -1,0 +1,1079 @@
+---
+title: 'Normalization of Proteomics Data'
+author: "Jan-Ole Schulze"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    number_sections: false
+    toc: true
+    toc_float: true
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+install.packages("BiocManager")
+BiocManager::install("PRONE")
+library("PRONE")
+
+BiocManager::install("POMA")
+library(POMA)
+
+library("data.table")
+library("ggplot2")
+library("SummarizedExperiment")
+library("patchwork")
+library("ggrepel")
+library("reshape2")
+
+# Set random number seed
+seed = 27
+set.seed(seed)
+```
+
+## Config
+```{r config}
+prot_file <- "harmonization_results/map_orthologs/Modified_Data.csv"
+meta_file <- "input/SampleDescription.csv"
+fraction_to_keep <- "AI"  # Set to "AI" or "AS"
+
+save_plots <- TRUE
+# Define the final output directory
+final_out_dir <- paste0("normalization_results_", fraction_to_keep)
+# Creates the folder if it doesn't exist
+if(!is.null(final_out_dir)){dir.create(final_out_dir, recursive = TRUE, showWarnings = FALSE)}
+```
+
+### Helper Functions
+```{r methods, include=FALSE}
+save_png <- function(p, filename) {
+  png(filename = filename)
+  print(p)
+  dev.off()
+}
+```
+
+## Prepare Data
+```{r load_data}
+# Load data
+prot_data <- data.table::fread(prot_file)
+meta_data <- data.table::fread(meta_file)
+
+cat("First few columns in prot_data:\n")
+print(head(names(prot_data), 10))
+```
+
+##### Changes in Meta Data
+- Creating a Copy of `meta_data`:
+We start by creating a copy of the original `meta_data` data table and assign it to md. This approach preserves the original `meta_data` for any future references.
+We modify and generate column names.
+This results in a refined version of md with a focus on the columns "Column", "TMT", "Batch", "Animal", "Timepoint", "Condition", "Location", and "Label".
+
+```{r change_meta}
+# Make copy of meta_data
+md <- meta_data
+
+md[, `:=` (
+    Label = paste0(animal_no, "_", fraction, "_", genotype, "_", scaffold),
+    Animal = animal_no,
+    Condition = genotype,
+    Fraction = fraction,
+    Timepoint = time,
+    Batch = study,
+    Column = sample_name,
+    Tissue = tissue,
+    Scaffold = scaffold,
+    Intervention = intervention
+)]
+
+md <- md[, .SD, .SDcols = c("Column", "Batch", "Animal", "Fraction", "Scaffold", "Intervention", "Timepoint", "Tissue", "Condition", "Label")]
+```
+
+##### Changes in Proteomics Data
+Handle Zeros: Convert zeros to `NA` in key columns listed in `md$Column`. This is crucial because zeros in proteomics data can indicate missing information, and treating them as `NA` ensures more accurate statistical interpretations.
+```{r change_proteomics_data}
+# Replace all 0s with NAs in specified columns of prot_data
+prot_data[, (md$Column) := lapply(.SD, function(x) { ifelse(x == 0, NA, x) }), .SDcols = md$Column]
+# Check for any remaining zeros in the specified columns
+remaining_zeros <- sum(sapply(prot_data[, md$Column, with = FALSE], function(col) sum(col == 0, na.rm = TRUE)))
+cat("Remaining zeros in specified columns:", remaining_zeros, "\n")
+```
+
+### Check protein occurences for AS vs. AI across every sample
+```{r}
+cat("Cleaned protein data dimensions:", dim(prot_data), "\n")
+
+# Get column indices in protein data for each sample type using cleaned metadata
+ai_sample_names <- md$Column[md$Fraction == "AI"]
+as_sample_names <- md$Column[md$Fraction == "AS"]
+
+# Initialize counters
+proteins_ai_only <- 0
+proteins_as_only <- 0
+proteins_both <- 0
+proteins_none <- 0
+
+# Initialize lists to store protein identifiers
+proteins_as_only_list <- c()
+proteins_ai_only_list <- c()
+proteins_both_list <- c()
+proteins_none_list <- c()
+
+# Only analyze proteins with a valid name
+valid_proteins <- !is.na(prot_data$ReducedGeneNames) & prot_data$ReducedGeneNames != ""
+analysis_data <- prot_data[valid_proteins, ]
+
+# Count proteins by their occurrence pattern
+for (i in 1:nrow(analysis_data)) {
+  # Check if protein has any non-NA values in each sample type (since zeros were converted to NA)
+  has_ai <- any(!is.na(analysis_data[i, ai_sample_names, with=FALSE]), na.rm=TRUE)
+  has_as <- any(!is.na(analysis_data[i, as_sample_names, with=FALSE]), na.rm=TRUE)
+  
+  # Get protein identifier
+  protein_id <- analysis_data$ReducedGeneNames[i]
+  
+  # Categorize based on occurrence
+  if (has_ai && has_as) {
+    proteins_both <- proteins_both + 1
+    proteins_both_list <- c(proteins_both_list, protein_id)
+  } else if (has_ai) {
+    proteins_ai_only <- proteins_ai_only + 1
+    proteins_ai_only_list <- c(proteins_ai_only_list, protein_id)
+  } else if (has_as) {
+    proteins_as_only <- proteins_as_only + 1
+    proteins_as_only_list <- c(proteins_as_only_list, protein_id)
+  } else {
+    proteins_none <- proteins_none + 1
+    proteins_none_list <- c(proteins_none_list, protein_id)
+  }
+}
+
+# Print results
+cat("Proteins found only in AI samples:", proteins_ai_only, "\n")
+cat("Proteins found only in AS samples:", proteins_as_only, "\n")
+cat("Proteins found in both sample types:", proteins_both, "\n")
+cat("Proteins not found in either sample type:", proteins_none, "\n")
+cat("Total analyzed:", nrow(analysis_data), "\n")
+
+# Print the list of proteins ONLY in AS samples
+cat("\n=== PROTEINS FOUND ONLY IN AS SAMPLES ===\n")
+if(length(proteins_as_only_list) > 0) {
+  for(i in 1:length(proteins_as_only_list)) {
+    cat(sprintf("%d. %s\n", i, proteins_as_only_list[i]))
+  }
+} else {
+  cat("No proteins found exclusively in AS samples.\n")
+}
+```
+
+### Remove rows belonging to a specified sample fraction
+```{r}
+### Remove samples based on fraction_to_keep
+fraction_to_remove <- ifelse(fraction_to_keep == "AI", "AS", "AI")
+
+cat(sprintf("=== KEEPING %s SAMPLES, REMOVING %s SAMPLES ===\n", 
+            fraction_to_keep, fraction_to_remove))
+
+# Print initial state
+cat("=== BEFORE FRACTION SAMPLE REMOVAL ===\n")
+cat("--- Meta data ---\n")
+md_original_shape <- dim(md)
+cat("Original metadata shape: ", md_original_shape[1], "rows ×", md_original_shape[2], "columns\n")
+cat("AS samples in metadata:", sum(md$Fraction == "AS"), "\n")
+cat("AI samples in metadata:", sum(md$Fraction == "AI"), "\n")
+
+cat("\n--- Protein dataset ---\n")
+original_prot_shape <- dim(prot_data)
+cat("Original protein dataset shape: ", original_prot_shape[1], "rows ×", original_prot_shape[2], "columns\n")
+
+# Step 1: Identify removable sample column names from metadata BEFORE filtering
+removable_samples_in_md <- md$Column[md$Fraction == fraction_to_remove]
+cat("\nFound", length(removable_samples_in_md), "fraction samples in metadata to remove\n")
+
+# Step 2: Remove AS samples from meta data first
+cat("\n--- Removing Fraction samples from metadata ---\n")
+md_filtered <- md[md$Fraction != fraction_to_remove, ]
+md_new_shape <- dim(md_filtered)
+cat("New metadata shape: ", md_new_shape[1], "rows ×", md_new_shape[2], "columns\n")
+cat("Metadata rows removed:", md_original_shape[1] - md_new_shape[1], "\n")
+# Update metadata reference
+md <- md_filtered
+
+# Step 3: Remove corresponding samples from protein dataset
+cat("\n--- Removing fraction samples from protein dataset ---\n")
+# Find AS sample columns that exist in protein data
+removable_samples_in_data <- intersect(removable_samples_in_md, names(prot_data))
+cat("Corresponding columns found in protein data:", length(removable_samples_in_data), "\n")
+
+if(length(removable_samples_in_data) > 0) {
+  # Print some example column names for verification
+  cat("Example fraction column to remove:", head(removable_samples_in_data, 1), "\n")
+  
+  # Create vector of columns to keep
+  columns_to_keep <- setdiff(names(prot_data), removable_samples_in_data)
+  
+  # Filter protein data
+  prot_data <- prot_data[, ..columns_to_keep]
+} else {
+  cat("No corresponding sample columns found in protein data - no filtering needed\n")
+}
+
+# Print final state
+cat("\n=== AFTER FRACTION SAMPLE REMOVAL ===\n")
+cat("--- Meta data ---\n")
+cat("Final metadata shape: ", dim(md)[1], "rows ×", dim(md)[2], "columns\n")
+cat("Remaining AI samples in metadata:", sum(md$Fraction == "AI"), "\n")
+cat("Remaining AS samples in metadata:", sum(md$Fraction == "AS"), "\n")
+
+cat("\n--- Protein dataset ---\n")
+new_prot_shape <- dim(prot_data)
+cat("Final protein dataset shape: ", new_prot_shape[1], "rows ×", new_prot_shape[2], "columns\n")
+cat("Columns removed from protein data:", original_prot_shape[2] - new_prot_shape[2], "\n")
+
+# Verify no AS columns remain in protein data
+remaining_removable_cols_in_data <- intersect(removable_samples_in_md, names(prot_data))
+cat("Remaining removable columns in protein data:", length(remaining_removable_cols_in_data), "\n")
+
+# Final verification - check consistency
+cat("\n=== FINAL CONSISTENCY CHECK ===\n")
+kept_columns_in_md <- md$Column[md$Fraction == fraction_to_keep]
+kept_columns_in_data <- intersect(kept_columns_in_md, names(prot_data))
+cat("Kept samples in metadata:", length(kept_columns_in_md), "\n")
+cat("Kept sample columns in protein data:", length(kept_columns_in_data), "\n")
+cat("Metadata and protein data consistency:", 
+    ifelse(length(kept_columns_in_md) == length(kept_columns_in_data), "✓ CONSISTENT", "✗ INCONSISTENT"), "\n")
+```
+
+
+### Load into Summarized Experiment
+In this section, we utilize the `load_data` function to import and structure proteomics data for further analysis. This function is specifically designed to handle real-world proteomics datasets, transforming them into a `SummarizedExperiment` object, which is a standard format for handling complex experimental data in bioinformatics.
+
+SummarizedExperiment Object
+├── assays          - The actual data matrices
+│   ├── counts      - e.g., raw protein intensities
+│   ├── log2        - e.g., log2-transformed values
+│   └── normalized  - e.g., normalized values
+│
+├── rowData         - Information about features (rows)
+│   ├── Protein.Ids
+│   ├── Gene.Names
+│   └── other protein annotations
+│
+├── colData         - Information about samples (columns)
+│   ├── Animal
+│   ├── Condition
+│   ├── Batch
+│   ├── Timepoint
+│   └── other sample metadata
+│
+└── metadata        - Experiment-level information
+    └── any additional info about the experiment
+
+**The load_data Function**
+The `load_data` function efficiently loads and organizes proteomics data, taking into account various aspects of the experimental design:
+- `data`: This is the main dataset with proteins as rows and samples as columns (e.g., proteinGroups.txt from MaxQuant).
+- `md`: The metadata or experimental design table, which should include a "Column" that corresponds to sample intensity column names in the data.
+- `protein_column`: The column name in data containing protein IDs.
+- `gene_column`: The column name in data containing gene names.
+- `ref_samples`: Reference samples, particularly useful in TMT experiments.
+- `batch_column`: The column in md that defines experimental batches.
+- `condition_column`: The column in md that defines experimental conditions.
+- `label_column`: A column in md containing simple sample names for visualization purposes.
+
+```{r prepare_data}
+se <- load_data(data = prot_data, md = md, 
+                protein_column = "Protein.Ids", gene_column = "ReducedGeneNames", # Use this gene column to have exactly one canonical name for the same gene!
+                ref_samples = NULL, 
+                batch_column = NULL, condition_column = NULL, label_column = "Label")
+
+# Remove raw assay since normalization should work on log2 data
+#assays(se)[["raw"]] <- NULL
+print(names(assays(se)))
+```
+
+### Filter Proteins
+In the subsequent steps, we employ specific filtering criteria to refine the proteomics dataset. This involves the removal of proteins based on the presence of missing values (NAs) and specific attributes. We utilize two distinct functions for this purpose:
+- `filter_complete_NA_proteins`: This function targets proteins that exhibit missing values across all samples. Removing these proteins ensures that the dataset focuses only on proteins with measurable values, thereby enhancing the quality and reliability of the data.
+- `filter_proteins_by_value`: This function is designed to filter out proteins based on specific values in a given column. For instance, proteins marked as reverse hits, potential contaminants, or only identified by a particular site can be selectively excluded from the analysis, improving the dataset's accuracy.
+```{r filter_proteins}
+# List all functions in the PRONE package
+prone_functions <- ls("package:PRONE")
+# Look for functions with "filter" in their name
+filter_functions <- grep("filter", prone_functions, value = TRUE)
+print(filter_functions)
+
+# remove proteins with NAs in all samples
+se <- filter_out_complete_NA_proteins(se)
+```
+
+### Overview of the Data
+In this section, we focus on obtaining a preliminary overview of the proteomics dataset encapsulated within a SummarizedExperiment object. This overview is crucial for understanding the data quality and distribution across various conditions and batches.
+- `get_NA_overview`: This function analyzes the extent of missing values (NAs) in the dataset. It returns a list containing the total number of values, the count of NAs, and the percentage of missing values. The analysis is performed on a specified data type, defaulting to log2-transformed values.
+- `plot_condition_overview`: This function generates a bar plot visualizing the number of samples per specified condition or batch. The visual representation helps in understanding the distribution of samples across different experimental conditions or batches.
+
+```{r pre_overview}
+get_NA_overview(se, ain = "log2")
+
+p1 <- plot_condition_overview(se, condition = "Condition")
+p2 <- plot_condition_overview(se, condition = "Batch")
+p3 <- plot_heatmap(se = se, ain = "log2", color_by = c("Condition", "Scaffold"), label_by = "Animal")[["log2"]]
+
+file_type <- "png"
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"initial_data_overview"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+   
+  ggsave(filename = file.path(sub_dir, paste0("num_per_condition.", file_type)), plot = p1)
+  ggsave(filename = file.path(sub_dir, paste0("num_per_batch.", file_type)), plot = p2)
+  save_png(p = p3, filename = file.path(sub_dir, paste0("heatmap.", file_type)))
+}
+
+for (p in list(p1, p2, p3)){
+  print(p)
+}
+```
+
+### Check NAs
+After filtering the proteomics dataset, analyzing the pattern of missing values (NAs) is essential for understanding the data's quality and guiding further processing. We employ three distinct plotting functions, each providing a unique perspective on the NA distribution.
+- `plot_NA_density`: Generates a density plot to visualize the intensity distribution of proteins, segregating them based on the presence or absence of NAs. This plot helps in identifying any potential biases in data due to missing values.
+- `plot_NA_heatmap`: This function crafts a heatmap that represents the pattern of NAs in the dataset. Key customization options include:
+    - `color_by`: Specifies the column to color the samples. Set to NULL by default, which uses the condition column of the SummarizedExperiment object. Setting it to "No" omits the color bar.
+    - `label_by`: Determines the column for labeling the samples. Defaults to NULL, using the labels column of the SummarizedExperiment object. "No" indicates no sample labeling.
+    - `cluster_samples`: Boolean to decide if samples should be clustered.
+    - `cluster_proteins`: Boolean to decide if proteins should be clustered.
+    - `show_row_dend`: Boolean to control the display of the row dendrogram.
+    - `show_column_dend`: Boolean to control the display of the column dendrogram.
+
+```{r filter_proteins_plot, warning=FALSE}
+# check NA pattern
+p1 <- plot_NA_density(se)
+p2 <- plot_NA_heatmap(se, label_by = "No", color_by = NULL, 
+                      cluster_samples = TRUE, cluster_proteins = TRUE, 
+                      show_row_dend = TRUE, show_column_dend = FALSE)
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"initial_data_overview"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+
+  ggsave(filename = file.path(sub_dir, paste0("na_density.", file_type)), plot = p1)
+  save_png(filename = file.path(sub_dir, "na_heatmap.png"), p = p2)
+}
+
+for (p in list(p1, p2)){
+  print(p)
+}
+```
+
+## Outlier detection using POMA
+```{r}
+# Find outliers by "Condition"
+args(POMA::PomaOutliers)
+outliers_result <- POMA::PomaOutliers(se, 
+                                      method = "euclidean", 
+                                      type = "median",
+                                      outcome = "Condition",
+                                      coef = 2,
+                                      labels = FALSE) 
+print(outliers_result$distance_boxplot)
+outlier_samples_condition <- outliers_result$outliers
+print(outlier_samples_condition)
+
+# Find outliers by "Scaffold"
+args(POMA::PomaOutliers)
+outliers_result <- POMA::PomaOutliers(se, 
+                                      method = "euclidean", 
+                                      type = "median",
+                                      outcome = "Scaffold",
+                                      coef = 2,
+                                      labels = FALSE) 
+print(outliers_result$distance_boxplot)
+outlier_samples_scaffold <- outliers_result$outliers
+print(outlier_samples_scaffold)
+```
+
+## Pre-normalization visualization
+```{r}
+p_pre_box_condition <- plot_boxplots(se, ain = "log2", label_by = "Condition", color_by = "Scaffold")
+
+p_pre_pca_cond <- plot_PCA(se, ain = "log2", color_by = "Scaffold", 
+                  label_by = "No", shape_by = "Condition")
+
+# Save plots if saving is enabled
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"initial_data_overview"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  save_png(filename = file.path(sub_dir, "p_pre_box_condition"), p = p_pre_box_condition) 
+  save_png(filename = file.path(sub_dir, "pre_pca_cond"), p = p_pre_pca_cond)
+}
+
+# Display the plots
+print(p_pre_box_condition)
+print(p_pre_pca_cond)
+```
+
+# Perform Normalization
+```{r normalize}
+# See what normalization methods are actually available
+available_methods <- get_normalization_methods()
+print(available_methods)
+
+# Define normalization methods
+normalization_methods <- c("RobNorm", "LoessF", "MAD", "Median", "Quantile")
+
+# Normalize the SummarizedExperiment object
+# Normalizes all assays in the object - which should just be the log2 one at this point
+se_normalized <- normalize_se(se, methods = normalization_methods)
+
+if (!is.null(final_out_dir)){
+  export_data(se = se_normalized, out_dir = final_out_dir, ain = normalization_methods)
+}
+```
+
+### Qualitative Evaluation
+In this section, we employ various visualization techniques to scrutinize the normalized proteomics data encapsulated within a `SummarizedExperiment` object. These visualizations help us understand data distribution and relationships among various experimental factors.
+- `Boxplots`: The `plot_boxplots` function visualizes the distribution of normalized data as boxplots. It provides insights into data variability and outliers across samples.
+    - `se`: The normalized `SummarizedExperiment` object.
+    - `ain`: A vector of strings indicating which assays to use as input. If `NULL`, all normalized assays are plotted side by side.
+    - `color_by`: A string specifying the metadata column to use for coloring the samples. If `NULL`, colors are assigned based on conditions.
+    - `label_by`: A string specifying the metadata column for labeling samples. If `NULL`, labels are not displayed.
+    - `ncol`: Number of columns for faceting the plot.
+    - `facet_norm`: A boolean to indicate whether to facet the plot by normalization methods.
+- `Density Plots`: The `plot_densities` function produces density plots, which illustrate the distribution of normalized data.
+    - `se`: The `SummarizedExperiment` object containing normalized data.
+    - `ain`: A vector of strings indicating which assays to use. If `NULL`, all normalized assays are considered.
+    - `color_by`: A string specifying the column to color the samples. If `NULL`, colors are based on conditions.
+    - `facet_norm`: A boolean specifying whether to facet by normalization methods.
+- `PCA Plots`: The plot_PCA function creates PCA plots, which are useful for visualizing data variation and relationships in a reduced dimensionality space.
+    - `se`: The normalized SummarizedExperiment object.
+    - `ain`: A vector of strings indicating which assays to use. If NULL, all assays are plotted.
+    - `color_by`: A string specifying the column for coloring samples. If NULL, colors are based on timepoints.
+    - `label_by`: A string specifying the column for labeling samples. If NULL, labels are not displayed.
+    - `shape_by`: A string specifying the column for shaping samples. If NULL, shapes are based on conditions.
+    - `facet_norm`: A boolean specifying whether to facet the plot by normalization methods.
+    - `facet_by`: A string specifying the column for faceting the samples.
+    - `ellipse`: A boolean indicating if ellipses should be drawn around clusters.
+    - `ncol`: Number of columns for faceting the plot.
+
+```{r qualitative}
+p1 <- plot_boxplots(se_normalized, ain = normalization_methods, 
+                    color_by = "Scaffold", label_by = "Condition")
+
+p2 <- plot_PCA(se_normalized, ain = normalization_methods, color_by = "Scaffold", 
+               label_by = "No", shape_by = "Condition", facet_norm = TRUE)
+
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  ggsave(filename = file.path(sub_dir, paste0("boxplot_condition.", file_type)), plot = p1)
+  ggsave(filename = file.path(sub_dir, paste0("pca_condition.", file_type)), plot = p2)
+}
+
+for (p in list(p1, p2)){
+  print(p)
+}
+```
+
+### Quantitative Evalutation
+In this segment, we delve into assessing the intragroup variation in our normalized proteomics dataset encapsulated in a `SummarizedExperiment` object. Understanding intragroup variation is crucial for evaluating the consistency of data within experimental conditions or groups.
+- `Intragroup Correlation`: The `plot_intragroup_correlation` function calculates and visualizes the correlation within groups. This is useful for assessing the similarity or consistency of data within each condition or group.
+    - `se`: The normalized `SummarizedExperiment` object.
+    - `ain`: A vector of strings indicating which assays to use as input. If `NULL`, all normalized assays are considered.
+    - `condition`: Column name specifying the condition for grouping. If `NULL`, the default condition column of the `SummarizedExperiment` object is used.
+    - `method`: Correlation method (pearson, spearman, or kendall).
+- `Pooled Coefficient of Variation (PCV)`: The `plot_intragroup_PCV` function calculates and visualizes the pooled coefficient of variation within groups.
+    - `se`: The `SummarizedExperiment` object containing normalized data.
+    - `ain`: A vector of strings indicating which assays to use as input. If `NULL`, all assays are considered.
+    - `condition`: Column name specifying the condition for grouping.
+    - `diff`: A boolean indicating whether to visualize the reduction of intragroup variation compared to log-transformed data.
+- `Pooled Median Absolute Deviation (PMAD)`: The `plot_intragroup_PMAD` function showcases the median absolute deviation within groups.
+    - `se`: The normalized `SummarizedExperiment` object.
+    - `ain`: A vector of strings indicating which assays to use as input.
+    - `condition`: Column name for grouping.
+    - `diff`: Boolean indicating whether to compare variation reduction to log-transformed data.
+- `Pooled Estimate of Variance (PEV)`: The `plot_intragroup_PEV` function visualizes the pooled estimate of variance within groups.
+    - `se`: The `SummarizedExperiment` object.
+    - `ain`: A vector of strings indicating which assays to use.
+    - `condition`: Column name specifying the condition for grouping.
+    - `diff`: Boolean indicating if variation reduction compared to log-transformed data should be visualized.
+
+```{r}
+plotted_methods = c(normalization_methods, "log2")
+```
+
+### Plot intragroup correlation metrics
+```{r}
+analyze_intragroup_correlation <- function(se, ain = NULL, group_vars = c("Condition", "Scaffold"), create_plots = TRUE) {
+  if (is.null(ain)) {
+    ain <- names(assays(se))
+  }
+  
+  # Prepare results storage
+  all_results <- list()
+  median_results <- list()
+  
+  # Process each group variable
+  for (group_var in group_vars) {
+    group_results <- data.frame()
+    method_medians <- c()
+    method_names <- c()
+    
+    # Process each method
+    for (method in ain) {
+      # Get data for this normalization method
+      data_matrix <- assay(se, method)
+      groups <- se[[group_var]]
+      
+      # Calculate intra-group correlations for all samples
+      intra_correlations <- c()
+      
+      # Get unique groups
+      unique_groups <- unique(groups)
+      
+      # Process each group separately
+      for (group_level in unique_groups) {
+        # Get indices for this group
+        group_indices <- which(groups == group_level)
+        
+        # Skip if too few samples in group
+        if (length(group_indices) < 2) {
+          next
+        }
+        
+        # Get data for this group - handle both matrix and data.table cases
+        if (is.data.table(data_matrix)) {
+          # For data.table we need special syntax
+          group_data <- data_matrix[, ..group_indices]
+        } else {
+          # For regular matrix
+          group_data <- data_matrix[, group_indices, drop = FALSE]
+        }
+        
+        # Calculate pairwise correlations for all sample pairs in this group
+        if (ncol(group_data) >= 2) {
+          # Calculate correlation for each pair of samples
+          n_samples <- ncol(group_data)
+          
+          for (i in 1:(n_samples-1)) {
+            for (j in (i+1):n_samples) {
+              # Get data for this pair
+              if (is.data.table(group_data)) {
+                x <- group_data[[i]]
+                y <- group_data[[j]]
+              } else {
+                x <- group_data[, i]
+                y <- group_data[, j]
+              }
+              
+              # Calculate correlation, skipping NA/NaN values
+              valid_indices <- !is.na(x) & !is.na(y)
+              if (sum(valid_indices) >= 3) { # Need at least 3 points for meaningful correlation
+                cor_val <- cor(x[valid_indices], y[valid_indices], method = "pearson")
+                if (!is.na(cor_val)) {
+                  intra_correlations <- c(intra_correlations, cor_val)
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      # Skip if no valid calculations
+      if (length(intra_correlations) == 0) next
+      
+      # Store the detailed results for boxplots
+      method_results <- data.frame(
+        Method = rep(method, length(intra_correlations)),
+        Correlation = intra_correlations
+      )
+      group_results <- rbind(group_results, method_results)
+      
+      # Calculate and store median for comparison plot
+      median_var <- median(intra_correlations)
+      method_medians <- c(method_medians, median_var)
+      method_names <- c(method_names, method)
+    }
+    
+    # Store results for this group variable
+    all_results[[group_var]] <- group_results
+    median_results[[group_var]] <- data.frame(
+      Method = method_names,
+      Median = method_medians
+    )
+  }
+  
+  # Create plots if requested
+  plots <- list()
+  
+  if (create_plots) {
+    library(ggplot2)
+    
+    # Create boxplots for each group variable
+    for (group_var in group_vars) {
+      p <- ggplot(all_results[[group_var]], aes(x = Method, y = Correlation, fill = Method)) +
+        geom_boxplot(outlier.color = "black", outlier.size = 1) +
+        scale_fill_brewer(palette = "Set3") +
+        theme_bw() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "right"
+        ) +
+        labs(
+          title = paste("Intragroup Correlation \nby", group_var),
+          y = "Pearson correlation between sample pairs \nwithin each group",
+          x = "Normalization Method"
+        )
+      
+      plots[[paste0("boxplot_", group_var)]] <- p
+    }
+    
+    # Create comparison scatter plot if we have multiple group variables
+    if (length(group_vars) >= 2) {
+      # Merge the first two group variables (common use case)
+      var1 <- group_vars[1]
+      var2 <- group_vars[2]
+      
+      comparison_data <- merge(
+        median_results[[var1]], 
+        median_results[[var2]], 
+        by = "Method"
+      )
+      names(comparison_data) <- c("Method", paste0(var1, "_Median"), paste0(var2, "_Median"))
+      
+      # Create scatterplot
+      p_scatter <- ggplot(comparison_data, 
+                         aes_string(x = paste0(var1, "_Median"), 
+                                   y = paste0(var2, "_Median"), 
+                                   label = "Method")) +
+        geom_point(aes(color = Method), size = 3) +
+        geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
+        theme_bw() +
+        labs(
+          title = paste("Medians of Intragroup Correlation Coefficients"),
+          x = paste("Median of Pearson correlation coefficient \nwithin each", var1, "group"),
+          y = paste("Median of Pearson correlation coefficient \nwithin each", var2, "group")
+        ) +
+        theme(legend.position = "none")
+      
+      plots[["comparison_scatter"]] <- p_scatter
+    }
+  }
+  
+  # Return comprehensive results
+  return(list(
+    detailed_results = all_results,
+    median_results = median_results,
+    plots = plots
+  ))
+}
+
+# 
+corr_results <- analyze_intragroup_correlation(
+  se = se_normalized, 
+  ain = plotted_methods,
+  group_vars = c("Condition", "Scaffold"),
+  create_plots = TRUE
+)
+
+# Display boxplots
+intra_corr_cond_plot = corr_results$plots$boxplot_Condition
+intra_corr_cond_plot <- intra_corr_cond_plot + theme(legend.position = "none")
+intra_corr_scaff_plot = corr_results$plots$boxplot_Scaffold
+combined_plot <- intra_corr_cond_plot | intra_corr_scaff_plot
+print(combined_plot)
+
+# Display scatter plot comparing medians
+print(corr_results$plots$comparison_scatter)
+
+# Save correlation plots
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  save_png(filename = file.path(sub_dir, "intragroup_correlation_condition.png"), p = combined_plot)
+  save_png(filename = file.path(sub_dir, "intragroup_correlation_comparison.png"), p = corr_results$plots$comparison_scatter)
+}
+```
+
+### Create combined plots of intergroup and intragroup variation for Condition
+```{r}
+# Calculate both intragroup and intergroup variation, create ONE combined plot
+
+# Storage for results
+intragroup_medians <- c()
+intergroup_medians <- c()
+method_names <- c()
+
+# Calculate both metrics for each method
+for (method in plotted_methods) {
+  data_matrix <- assay(se_normalized, method)
+  groups <- se_normalized[["Condition"]]
+  
+  # Calculate intragroup variation (PMAD)
+  pmad_values <- c()
+  for (i in 1:nrow(data_matrix)) { # For each protein
+    feature_data <- as.numeric(data_matrix[i,]) # Get the protein values
+    grouped_data <- split(feature_data, factor(groups)) # Split by group/condition
+    
+    group_mads <- c()
+    group_sizes <- c()
+    
+    # For each condition group, calculate MAD
+    for (group_level in names(grouped_data)) {
+      # Get the protein expression values for samples in this condition
+      group_values <- grouped_data[[group_level]]
+      group_values <- group_values[!is.na(group_values)]
+      
+      # MAD = median(|x_i - median(x)|)
+      if (length(group_values) >= 2) {
+        group_mads <- c(group_mads, mad(group_values, na.rm = TRUE))
+        group_sizes <- c(group_sizes, length(group_values))
+      }
+    }
+    
+    # PMAD = (MAD₁ × n₁ + MAD₂ × n₂ + ...) / (n₁ + n₂ + ...)
+    if (length(group_mads) > 0) {
+      pmad <- sum(group_mads * group_sizes) / sum(group_sizes)
+      pmad_values <- c(pmad_values, pmad)
+    }
+  }
+  
+  # Calculate intergroup variation
+  between_variations <- c()
+  for (i in 1:nrow(data_matrix)) {
+    feature_data <- as.numeric(data_matrix[i,])
+    grouped_data <- split(feature_data, factor(groups))
+    group_means <- sapply(grouped_data, mean, na.rm = TRUE)
+    
+    if (!any(is.na(group_means))) {
+      between_var <- sd(group_means)
+      between_variations <- c(between_variations, between_var)
+    }
+  }
+  
+  # Store medians
+  if (length(pmad_values) > 0 && length(between_variations) > 0) {
+    intragroup_medians <- c(intragroup_medians, median(pmad_values))
+    intergroup_medians <- c(intergroup_medians, median(between_variations))
+    method_names <- c(method_names, method)
+  }
+}
+
+# Create combined data
+combined_data <- data.frame(
+  Method = method_names,
+  Intragroup_PMAD = intragroup_medians,
+  Intergroup_Variation = intergroup_medians
+)
+
+all_values <- c(combined_data$Intragroup_PMAD, combined_data$Intergroup_Variation)
+axis_min <- min(all_values, na.rm = TRUE)
+axis_max <- max(all_values, na.rm = TRUE)
+
+condition_plot <- ggplot(combined_data, aes(x = Intragroup_PMAD, y = Intergroup_Variation, label = Method)) +
+  geom_point(aes(color = Method), size = 4, alpha = 0.8) +
+  geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
+  scale_x_reverse(limits = c(axis_max, axis_min)) +
+  scale_y_continuous(limits = c(axis_min, axis_max)) +
+  coord_fixed(ratio = 1) +
+  theme_bw() +
+  labs(
+    title = "Normalization Method Comparison: Condition Groups",
+    x = "Intragroup Variation (PMAD)",
+    y = "Intergroup Variation\n(Standard deviation of group means)",
+    color = "Method"
+  ) +
+  theme(legend.position = "right")
+
+sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
+save_png(filename = file.path(sub_dir, "varations_by_condition.png"), p = condition_plot)
+print(condition_plot)
+```
+
+### Create combined plots of intergroup and intragroup variation for Scaffold
+```{r}
+# Calculate both intragroup and intergroup variation, create ONE combined plot
+
+# Storage for results
+intragroup_medians <- c()
+intergroup_medians <- c()
+method_names <- c()
+
+# Calculate both metrics for each method
+for (method in plotted_methods) {
+  data_matrix <- assay(se_normalized, method)
+  groups <- se_normalized[["Scaffold"]]
+  
+  # Calculate intragroup variation (PMAD)
+  pmad_values <- c()
+  for (i in 1:nrow(data_matrix)) { # For each protein
+    feature_data <- as.numeric(data_matrix[i,]) # Get the protein values
+    grouped_data <- split(feature_data, factor(groups)) # Split by group/condition
+    
+    group_mads <- c()
+    group_sizes <- c()
+    
+    # For each condition group, calculate MAD
+    for (group_level in names(grouped_data)) {
+      # Get the protein expression values for samples in this condition
+      group_values <- grouped_data[[group_level]]
+      group_values <- group_values[!is.na(group_values)]
+      
+      # MAD = median(|x_i - median(x)|)
+      if (length(group_values) >= 2) {
+        group_mads <- c(group_mads, mad(group_values, na.rm = TRUE))
+        group_sizes <- c(group_sizes, length(group_values))
+      }
+    }
+    
+    # PMAD = (MAD₁ × n₁ + MAD₂ × n₂ + ...) / (n₁ + n₂ + ...)
+    if (length(group_mads) > 0) {
+      pmad <- sum(group_mads * group_sizes) / sum(group_sizes)
+      pmad_values <- c(pmad_values, pmad)
+    }
+  }
+  
+  # Calculate intergroup variation
+  between_variations <- c()
+  for (i in 1:nrow(data_matrix)) {
+    feature_data <- as.numeric(data_matrix[i,])
+    grouped_data <- split(feature_data, factor(groups))
+    group_means <- sapply(grouped_data, mean, na.rm = TRUE)
+    
+    if (!any(is.na(group_means))) {
+      between_var <- sd(group_means)
+      between_variations <- c(between_variations, between_var)
+    }
+  }
+  
+  # Store medians
+  if (length(pmad_values) > 0 && length(between_variations) > 0) {
+    intragroup_medians <- c(intragroup_medians, median(pmad_values))
+    intergroup_medians <- c(intergroup_medians, median(between_variations))
+    method_names <- c(method_names, method)
+  }
+}
+
+# Create combined data
+combined_data <- data.frame(
+  Method = method_names,
+  Intragroup_PMAD = intragroup_medians,
+  Intergroup_Variation = intergroup_medians
+)
+
+all_values <- c(combined_data$Intragroup_PMAD, combined_data$Intergroup_Variation)
+axis_min <- min(all_values, na.rm = TRUE)
+axis_max <- max(all_values, na.rm = TRUE)
+
+scaffold_plot <- ggplot(combined_data, aes(x = Intragroup_PMAD, y = Intergroup_Variation, label = Method)) +
+  geom_point(aes(color = Method), size = 4, alpha = 0.8) +
+  geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
+  scale_x_reverse(limits = c(axis_max, axis_min)) +
+  scale_y_continuous(limits = c(axis_min, axis_max)) +
+  coord_fixed(ratio = 1) +
+  theme_bw() +
+  labs(
+    title = "Normalization Method Comparison: Scaffold Groups",
+    x = "Intragroup Variation (PMAD)",
+    y = "Intergroup Variation\n(Standard deviation of group means)",
+    color = "Method"
+  ) +
+  theme(legend.position = "right")
+
+sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
+save_png(filename = file.path(sub_dir, "varations_by_scaffold.png"), p = scaffold_plot)
+print(scaffold_plot)
+```
+
+
+### Print heatmap after normalization and before scaling
+```{r}
+p_heat_post_norm <- plot_heatmap(se = se_normalized, ain = "RobNorm", color_by = c("Condition", "Scaffold"), label_by = "Animal")
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  save_png(filename = file.path(sub_dir, "post_norm_pre_scaling_heatmap.png"), p = p_heat_post_norm)
+}
+
+print(p_heat_post_norm)
+```
+
+
+## Scaling
+```{r}
+scale_se <- function(se_data){
+  
+  # Get initial count
+  initial_samples <- ncol(se_data)
+  cat(sprintf("Initial number of samples: %d\n", initial_samples))
+  
+  # Convert column data from SummarizedExperiment to a data table for manipulation
+  coldata <- as.data.table(colData(se_data))
+
+  # Iterate over each assay in the SummarizedExperiment object
+  for(ain in names(assays(se_data))){
+    
+    # Convert the current assay to a data frame for processing
+    dt <- as.data.frame(assays(se_data)[[ain]])
+    
+    # For ZDF_validation batch - calculate condition-specific medians of ctrl_42 samples
+    # Identify the sample IDs
+    diabetic_ctrl42_cols <- coldata[coldata$Batch == "ZDF_validation" & 
+                                   coldata$Tissue == "ctrl_42" & 
+                                   coldata$Condition == "diabetic", ]$Column
+    
+    nondiabetic_ctrl42_cols <- coldata[coldata$Batch == "ZDF_validation" & 
+                                      coldata$Tissue == "ctrl_42" & 
+                                      coldata$Condition == "nondiabetic", ]$Column
+    
+    # Calculate condition-specific medians
+    diabetic_ctrl42_medians <- NULL
+    nondiabetic_ctrl42_medians <- NULL
+    
+    if (length(diabetic_ctrl42_cols) > 0) {
+      diabetic_ctrl42_medians <- apply(dt[, diabetic_ctrl42_cols, drop = FALSE], 1, median, na.rm = TRUE) # Calculate median row-wise
+    }
+    
+    if (length(nondiabetic_ctrl42_cols) > 0) {
+      nondiabetic_ctrl42_medians <- apply(dt[, nondiabetic_ctrl42_cols, drop = FALSE], 1, median, na.rm = TRUE)
+    }
+
+    # Iterate over each unique animal in the experiment
+    for (animal in unique(coldata$Animal)){
+      
+      # Get the batch for this animal
+      animal_batch <- unique(coldata[coldata$Animal == animal, ]$Batch)
+      if ("ZDF_validation" %in% animal_batch) {
+        # Get the condition for this animal
+        animal_condition <- unique(coldata[coldata$Animal == animal, ]$Condition)
+        
+        # Get all samples for this animal in ZDF_validation batch
+        r <- coldata[(coldata$Animal == animal) & (coldata$Batch == "ZDF_validation"),]$Column
+        
+        # Scale samples by condition-specific median
+        if (length(r) > 0) {
+          if (animal_condition == "diabetic" && !is.null(diabetic_ctrl42_medians)) {
+            for (col in r) {
+              dt[, col] <- dt[, col] - diabetic_ctrl42_medians
+            }
+          } else if (animal_condition == "nondiabetic" && !is.null(nondiabetic_ctrl42_medians)) {
+            for (col in r) {
+              dt[, col] <- dt[, col] - nondiabetic_ctrl42_medians
+            }
+          }
+        }
+      } else {
+                stop(sprintf("ERROR: Animal %s is from batch '%s', but scaling is only implemented for 'ZDF_validation' batch. 
+                     \nPlease check your data or implement scaling for other batches.", 
+                     animal, paste(animal_batch, collapse = ", ")))
+      }
+    }
+
+    # Add the scaled data as a new assay in the SummarizedExperiment object
+    assay(se_data, paste0(ain, "_scaled"), FALSE) <- as.data.table(dt)
+
+    # Remove the original (unscaled) assay data
+    assay(se_data, ain, FALSE) <- NULL
+  }
+  
+  # Count control samples
+  ctrl42_count <- sum(se_data$Tissue == "ctrl_42")
+  cat(sprintf("Control samples to be removed: %d ctrl_42 samples\n", ctrl42_count))
+
+  # Remove ctrl_0 from the SummarizedExperiment
+  samples_to_keep <- se_data$Tissue != "ctrl_42"
+  se_scaled <- se_data[, samples_to_keep]
+  
+  # Report final counts
+  final_samples <- ncol(se_scaled)
+  cat(sprintf("Final number of samples after filtering: %d\n", final_samples))
+  cat(sprintf("Total samples removed: %d\n", initial_samples - final_samples))
+
+  return(se_scaled)
+}
+```
+
+
+```{r perform and visualize scaling}
+se_scaled <- scale_se(se_normalized)
+
+if (!is.null(final_out_dir)){
+  # Create the scaled assay names (they now have "_scaled" suffix)
+  scaled_methods <- paste0(normalization_methods, "_scaled")
+  # CREATE THE SUBDIRECTORIES
+  scaled_dir <- file.path(final_out_dir, "scaled")
+  dir.create(scaled_dir, recursive = TRUE, showWarnings = FALSE)
+  # Export scaled data
+  export_data(se = se_scaled, out_dir = file.path(final_out_dir, "scaled"), ain = scaled_methods)
+}
+
+p1 <- plot_boxplots(se_scaled, ain = paste(normalization_methods, "_scaled", sep=""),
+                    color_by = "Scaffold", label_by = "Condition")
+
+p2 <- plot_PCA(se_scaled, ain = paste(normalization_methods, "_scaled", sep=""), color_by = "Scaffold", 
+               label_by = "No", shape_by = "Condition", facet_norm = TRUE)
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"post_scaling"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  ggsave(filename = file.path(sub_dir, paste0("boxplot_condition.", file_type)), plot = p1)
+  ggsave(filename = file.path(sub_dir, paste0("pca_condition.", file_type)), plot = p2)
+}
+
+for (p in list(p1, p2)){
+  print(p)
+}
+```
+
+## Choosing the best normalization based evaluation above.
+```{r selection_of_norm}
+desired_norm <- "RobNorm_scaled"
+```
+
+## Detect outliers again
+```{r}
+# Create SE object with only RobNorm data for outlier detection
+se_robnorm_only <- se_scaled
+assays(se_robnorm_only) <- assays(se_robnorm_only)[desired_norm]  # Keep only desired dataset
+
+# Now run outlier detection on normalized data
+outliers_result_robnorm <- POMA::PomaOutliers(se_robnorm_only,
+                                      method = "euclidean", 
+                                      type = "median",
+                                      outcome = "Condition",
+                                      coef = 2,
+                                      labels = FALSE)
+
+print(outliers_result_robnorm$distance_boxplot)
+outlier_samples_robnorm <- outliers_result_robnorm$outliers
+print(outlier_samples_robnorm)
+
+outliers_result_robnorm <- POMA::PomaOutliers(se_robnorm_only,
+                                      method = "euclidean", 
+                                      type = "median",
+                                      outcome = "Scaffold",
+                                      coef = 2,
+                                      labels = FALSE)
+
+print(outliers_result_robnorm$distance_boxplot)
+outlier_samples_robnorm <- outliers_result_robnorm$outliers
+print(outlier_samples_robnorm)
+```
+
+## Print heatmap of final dataset
+```{r}
+p <- plot_heatmap(se = se_scaled, ain = desired_norm, color_by = c("Condition", "Scaffold"), label_by = "No")
+
+if(save_plots && !is.null(final_out_dir)){
+  sub_dir <- paste0(file.path(final_out_dir,"post_scaling"))
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  save_png(filename = file.path(sub_dir, "post_scaling_heatmap.png"), p = p)
+}
+print(p)
+```

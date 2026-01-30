@@ -1,0 +1,465 @@
+---
+title: 'Harmonization of Proteomics Data'
+author: "Jan-Ole Schulze"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    number_sections: false
+    toc: true
+    toc_float: true
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+install.packages("remotes")
+
+remotes::install_github("symbod/proharmed-R")
+library("proharmed")
+```
+
+# What this script does
+It adds columns to the protein dataset:
+Original Data:              Data after Harmonization:
+Protein.Ids        →        Protein.Ids
+Genes (messy)      →        Genes (original)
+[intensity cols]   →        FilteredProteinIDs        ← NEW
+                            RemappedGeneNames         ← NEW  
+                            ReducedGeneNames          ← NEW
+                            Orthologs                 ← NEW
+                            [intensity cols]
+
+Removes ROWS Where:
+- Contamination proteins (REV__, CON__) or non-rat proteins in the FilteredProteinIDs step
+- Proteins without canonical Ensembl gene names (ReducedGeneName does not exist)
+                    
+
+
+## Run Proharmed Harmonization
+
+In this guide, we'll navigate through the essential steps of harmonizing proteomics data. Our focus is on refining proteomic datasets to enhance their clarity and utility. We begin with filtering protein IDs to ensure data accuracy, followed by gene name remapping and reduction for streamlined dataset representation. We also explore the mapping of orthologs, crucial for cross-species analysis. Utilizing the `proharmed` package, we'll demonstrate these processes and complement them with insightful visualizations, providing a clear view of each step in the data processing journey. This guide is a concise resource for effective proteomics data harmonization.
+
+### Config
+
+```{r config}
+prot_file <- "input/report.pg_matrix.tsv"
+meta_file <- "input/SampleDescription.csv"
+
+save_plots <- TRUE
+# Define the final output directory or set NULL if results should note be saved
+final_out_dir <- "harmonization_results"
+# Creates the folder if it doesn't exist
+if(!is.null(final_out_dir)){dir.create(final_out_dir, recursive = TRUE, showWarnings = FALSE)}
+```
+
+### Load Data & Function
+
+```{r load_data}
+# Load data
+prot_data <- data.table::fread(prot_file)
+meta_data <- data.table::fread(meta_file)
+
+head(prot_data)
+head(meta_data)
+```
+
+## Helper Functions
+
+```{r helper_function, include=FALSE} 
+# Function to save each data.frame in the list
+save_data_frames <- function(in_list, subdir) {
+  for (name in names(in_list)) {
+    filepath <- file.path(subdir, paste0(name, ".csv"))
+    # Create a copy of the data.frame for modification
+    df <- in_list[[name]]
+    # Check for columns that are lists and concatenate their elements
+    list_cols <- sapply(df, is.list)
+    if (any(list_cols)) {
+      df[list_cols] <- lapply(df[list_cols], function(col) {
+        sapply(col, function(cell) {
+          if (is.null(cell)) return(NA)
+          paste(cell, collapse = ";")
+        })
+      })
+    }
+    write.csv(df, file = filepath, row.names = FALSE)
+  }
+}
+```
+
+
+### Filtering Protein IDs
+
+The `filter_protein_ids` function is designed to process a DataFrame containing protein IDs. It allows for the removal of decoy IDs (such as those starting with "REV__" or "CON__"), contamination IDs, and the option to filter IDs based on a specified organism. Additionally, the function can restrict protein IDs to reviewed ones and manage empty cells in the dataset.
+
+#### Parameters
+
+- `data`: A DataFrame that includes a column with protein IDs.
+- `protein_column`: The name of the column in `data` that contains the protein IDs.
+- `organism`: (Optional) Specify the organism to filter the protein IDs. [human, rat, mouse, rabbit]
+- `rev_con`: (Optional) A boolean value indicating if decoy protein IDs should be kept.
+- `keep_empty`: A boolean value indicating if rows with empty protein ID cells (after filtering!) should be retained.
+- `res_column`: The name of the column where the filtered protein IDs will be stored. If `NULL`, the original `protein_column` will be overwritten.
+- `reviewed`: (Optional) A boolean value indicating if the protein IDs should be reduced to reviewed ones only.
+
+#### Run Method
+
+```{r filter_proteins}
+# Define the parameters
+protein_column <- "Protein.Ids"
+organism <- "rat"  
+rev_con <- FALSE 
+keep_empty <- FALSE
+res_column <- "FilteredProteinIDs"
+reviewed <- FALSE
+
+# Call the function
+filtered_prot_results <- proharmed::filter_protein_ids(data = prot_data, protein_column = protein_column, 
+                                                       organism = organism, rev_con = rev_con, 
+                                                       keep_empty = keep_empty, res_column = res_column,
+                                                       reviewed = reviewed)
+
+filtered_prot_data <- filtered_prot_results$Modified_Data # The original dataframe post filtering
+```
+
+#### Save Dataframes
+
+```{r filter_proteins_save, include=FALSE}
+# Create a subdirectory for filtered_protein_ids
+if(!is.null(final_out_dir)){
+  subdir <- file.path(final_out_dir, "filtered_protein_ids", "")
+  dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+  # Save the data.frames in the list to the specified subdirectory
+  save_data_frames(filtered_prot_results, subdir)
+}
+```
+
+
+#### Visualizing results
+
+##### Overview Plot
+
+`create_overview_plot` generates an overview plot of the logging data. This plot provides a high-level summary of the data processing steps.
+
+Parameters:
+
+- `logging`: A DataFrame containing the overview logging data returned by one of the proharmed methods.
+- `out_dir`: (Optional) The directory where the plot will be saved.
+- `file_type`: (Optional) The file format for the saved plot (e.g., png, pdf, jpg).
+
+Returns: A list of two `ggplot` objects.
+
+##### Detailed Plot for Filtered Protein IDs
+
+`create_filter_detailed_plot` creates a detailed plot specifically for the logging data of the `filter_protein_ids` method. This plot provides insights into how the protein IDs were filtered based on various criteria.
+
+Parameters:
+
+- `logging`: A DataFrame containing detailed logging data returned by the `filter_protein_ids` method.
+- `organism`: The organism specified in the `filter_protein_ids` method.
+- `reviewed`: The reviewed parameter value used in the `filter_protein_ids` method.
+- `decoy`: The rev_con parameter value used in the `filter_protein_ids` method.
+- `out_dir`: (Optional) The directory where the plot will be saved.
+- `file_type`: (Optional) The file format for the saved plot.
+
+Returns: A `ggplot` object.
+
+```{r filter_proteins_plots, message=FALSE, warning=FALSE}
+if(save_plots && !is.null(final_out_dir))
+  { out_dir=paste0(subdir, "/") } else { out_dir=NULL }
+
+file_type="png"
+
+library(reshape2)
+# Generate and visualize the overview plot
+overview_plots <- proharmed::create_overview_plot(logging = filtered_prot_results$Overview_Log, 
+                                                  out_dir = out_dir, file_type = file_type)
+print(overview_plots[[1]]) # Distribution of number of entries per row
+print(overview_plots[[2]]) # Number of entries added and removed
+
+# Generate and visualize the detailed filter plot
+detailed_plot <- proharmed::create_filter_detailed_plot(logging = filtered_prot_results$Detailed_Log, 
+                                                        organism = organism, reviewed = reviewed, 
+                                                        decoy = rev_con, out_dir = out_dir, file_type = file_type)
+print(detailed_plot) # Number of entries removed by cause
+```
+
+### Remap Gene Names
+
+The `remap_genenames` function in the proharmed package is designed to remap protein IDs to their associated gene names, offering various modes for filling empty entries or optionally replacing existing gene names. It processes the data row by row and performs the remapping of the genes, but the details depend on the configurations.
+
+Modes:
+
+- `all`: Uses primarily information from the FASTA headers, supplemented with UniProt information.
+- `fasta`: Utilizes information extracted from FASTA headers.
+- `uniprot`: Employs mapping information from UniProt to use all gene names.
+- `uniprot_primary`: Uses UniProt mapping information but limits to primary gene names.
+- `uniprot_one`: Uses UniProt mapping but only employs the most frequent single gene name.
+
+#### Parameters
+
+- `data`: A DataFrame containing a column with protein IDs.
+- `mode`: Mode of refilling (options are all, fasta, uniprot, uniprot_primary, uniprot_one).
+- `protein_column`: Name of the column with protein IDs.
+- `gene_column`: (Optional) Name of the column with gene names. Defaults to "Gene Names".
+- `res_column`: Name of the column for results. If NULL, the `gene_column` will be overwritten.
+- `skip_filled`: (Optional) A boolean value indicating if already filled gene name cells should be skipped.
+- `organism`: (Optional) Specify the organism for matching IDs. [human, rat, mouse, rabbit]
+- `fasta`: (Optional) FASTA file to use when mode is all or fasta.
+- `keep_empty`: A boolean value indicating if rows with empty remapped gene names (after remapping!) should be retained.
+
+#### Run Method
+
+```{r remap_gene_names}
+# Define the parameters
+mode <- "uniprot_one"  # Choose from 'all', 'fasta', 'uniprot', 'uniprot_primary', 'uniprot_one'
+protein_column <- "FilteredProteinIDs"
+gene_column <- "Genes"  # Previously "Gene Names" which is also the default
+res_column <- "RemappedGeneNames"  # Set to NULL to overwrite 'gene_column'
+skip_filled <- TRUE # Skip every row where a gene name is provided
+organism <- "rat"  
+fasta <- NULL  # Specify FASTA file path, if required
+keep_empty <- TRUE
+
+remapped_prot_results <- proharmed::remap_genenames(data =  filtered_prot_data, mode = mode, 
+                                                    protein_column = protein_column, 
+                                                    gene_column = gene_column, 
+                                                    res_column = res_column, 
+                                                    skip_filled = skip_filled, 
+                                                    organism = organism, 
+                                                    fasta = fasta, 
+                                                    keep_empty = keep_empty)
+
+remapped_prot_data <- remapped_prot_results$Modified_Data
+```
+
+#### Save Dataframes
+
+```{r remap_gene_names_save, include=FALSE}
+# Create a subdirectory for remap_gene_names
+if(!is.null(final_out_dir)){
+  subdir <- file.path(final_out_dir, "remap_gene_names", "")
+  dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+  # Save the data.frames in the list to the specified subdirectory
+  save_data_frames(remapped_prot_results, subdir)
+}
+```
+
+
+#### Visualizing results
+
+##### Overview Plot
+
+`create_overview_plot` generates an overview plot of the logging data. This plot provides a high-level summary of the data processing steps.
+
+Parameters:
+
+- `logging`: A DataFrame containing the overview logging data returned by one of the proharmed methods.
+- `out_dir`: (Optional) The directory where the plot will be saved.
+- `file_type`: (Optional) The file format for the saved plot (e.g., png, pdf, jpg).
+
+Returns: A list of two `ggplot` objects.
+
+```{r remap_gene_names_plots, message=FALSE, warning=FALSE}
+if(save_plots && !is.null(final_out_dir))
+{ out_dir=subdir } else { out_dir=NULL }
+
+file_type="png"
+
+# Generate and visualize the overview plot
+overview_plots <- proharmed::create_overview_plot(logging = remapped_prot_results$Overview_Log, 
+                                                  out_dir = out_dir, file_type = file_type)
+print(overview_plots[[1]]) # Distribution of number of entries per line
+print(overview_plots[[2]]) # Number of entries added and removed
+
+```
+
+### Reduce Gene Names
+
+The `reduce_genenames` function in the `proharmed` package is designed to streamline gene names in a dataset by reducing redundant names to a single representative name. It supports several modes of operation for this reduction process:
+
+- `ensembl`: Reduces gene names to those with an Ensembl ID, using gProfiler.
+- `HGNC`: Utilizes the HGNC database for reduction (specific to human genes).
+- `mygeneinfo`: Employs the mygene.info database for gene name reduction.
+- `enrichment`: Reduces gene names based on functional annotation, using gProfiler.
+
+#### Parameters
+
+- `data`: A DataFrame containing a column with gene names.
+- `mode`: The mode of reduction (ensembl, HGNC, mygeneinfo, enrichment).
+- `gene_column`: Name of the column with gene names.
+- `organism`: The organism for matching IDs.
+- `res_column`: Name of the column for results. If NULL, the `gene_column` will be overwritten.
+- `keep_empty`: Boolean indicating whether to retain rows with empty reduced gene names.
+- `HGNC_mode`: Setting for selecting gene names in HGNC (options: mostfrequent, all). Relevant only for the HGNC mode.
+
+#### Run Method
+
+```{r reduce_gene_names}
+# Define the parameters
+mode <- "ensembl"  # Choose from 'ensembl', 'HGNC', 'mygeneinfo', 'enrichment'
+gene_column <- "RemappedGeneNames"
+organism <- "rat" 
+res_column <- "ReducedGeneNames"
+keep_empty <- FALSE
+HGNC_mode <- "mostfrequent"  # 'mostfrequent' or 'all' for HGNC mode
+
+# Reducing gene names
+reduced_prot_results <- proharmed::reduce_genenames(data = remapped_prot_data, 
+                                                    mode = mode, 
+                                                    gene_column = gene_column, 
+                                                    organism = organism,
+                                                    res_column = res_column, 
+                                                    keep_empty = keep_empty, 
+                                                    HGNC_mode = HGNC_mode)
+
+reduced_prot_data <- reduced_prot_results$Modified_Data
+```
+
+
+#### Save Dataframes
+
+```{r reduce_gene_names_save, include=FALSE}
+# Create a subdirectory for reduce_gene_names
+if(!is.null(final_out_dir)){
+  subdir <- file.path(final_out_dir, "reduce_gene_names", "")
+  dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+  # Save the data.frames in the list to the specified subdirectory
+  save_data_frames(reduced_prot_results, subdir)
+}
+```
+
+#### Visualizing results
+
+##### Overview Plot
+
+`create_overview_plot` generates an overview plot of the logging data. This plot provides a high-level summary of the data processing steps.
+
+Parameters:
+
+- `logging`: A DataFrame containing the overview logging data returned by one of the proharmed methods.
+- `out_dir`: (Optional) The directory where the plot will be saved.
+- `file_type`: (Optional) The file format for the saved plot (e.g., png, pdf, jpg).
+
+Returns: A list of two `ggplot` objects.
+
+##### Detailed Plot for Reduces Gene Names
+
+`create_reduced_detailed_plot` is a specialized function for generating a detailed visualization of the logging data associated with the `reduce_genenames` method from the mqhandler package. This plot offers a granular view of the gene name reduction process, highlighting key steps and outcomes.
+
+Parameters
+
+- `logging`: A DataFrame containing detailed logging data returned by the reduce_genenames method of mqhandler.
+- `out_dir`: (Optional) The directory where the plot will be saved. If not specified, the plot is not saved but returned for display.
+- `file_type`: (Optional) The file format for the saved plot (options include 'png', 'pdf', 'jpg', etc.).
+
+Returns: A `ggplot` object.
+
+```{r reduce_gene_names_plots, message=FALSE, warning=FALSE}
+if(save_plots && !is.null(final_out_dir))
+{ out_dir=subdir } else { out_dir=NULL }
+
+file_type="png"
+
+# Generate and visualize the overview plot
+overview_plots <- proharmed::create_overview_plot(logging = reduced_prot_results$Overview_Log, 
+                                                  out_dir = out_dir, file_type = file_type)
+print(overview_plots[[1]]) # Distribution of number of entries per row
+print(overview_plots[[2]]) # Number of entries added and removed
+
+# Generate and visualize the detailed reduced gene names plot
+detailed_plot <- proharmed::create_reduced_detailed_plot(logging = reduced_prot_results$Detailed_Log, 
+                                                         out_dir = out_dir, file_type = file_type)
+print(detailed_plot) # Number of entries removed by cause
+```
+
+### Map Orthologs
+
+The `map_orthologs` function from the `proharmed` package is designed to map gene names from one organism to their orthologs in another organism. This function is particularly useful for cross-species analyses and comparative genomics studies.
+
+#### Parameters
+
+- `data`: A DataFrame containing a column with gene names.
+- `gene_column`: The name of the column in data that contains the gene names.
+- `organism`: The organism corresponding to the current gene names in the data.
+- `tar_organism`: The target organism to which you want to map the orthologs.
+- `res_column`: The name of the column where the orthologs will be stored. If NULL, the gene_column will be overwritten.
+- `keep_empty`: A boolean value indicating whether rows with empty cells (where orthologs could not be found) should be kept or deleted.
+
+#### Run Method
+
+```{r map_orthologs}
+# Define the parameters
+gene_column <- "RemappedGeneNames"
+organism <- "rat" 
+tar_organism <- "human"  #
+res_column <- "Orthologs"  # Column name for the results
+keep_empty <- TRUE 
+
+# Mapping orthologs
+orthologs_prot_results <- proharmed::map_orthologs(data = reduced_prot_data, gene_column = gene_column, 
+                                                   organism = organism, tar_organism = tar_organism, 
+                                                   res_column = res_column, keep_empty = keep_empty)
+
+orthologs_prot_data <- orthologs_prot_results$Modified_Data
+```
+
+#### Save Dataframes
+
+```{r map_orthologs_save, include=FALSE}
+# Create a subdirectory for map_orthologs
+if(!is.null(final_out_dir)){
+  subdir <- file.path(final_out_dir, "map_orthologs", "")
+  dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+  # Save the data.frames in the list to the specified subdirectory
+  save_data_frames(orthologs_prot_results, subdir)
+}
+```
+
+#### Visualizing results
+
+##### Overview Plot
+
+`create_overview_plot` generates an overview plot of the logging data. This plot provides a high-level summary of the data processing steps.
+
+Parameters:
+
+- `logging`: A DataFrame containing the overview logging data returned by one of the proharmed methods.
+- `out_dir`: (Optional) The directory where the plot will be saved.
+- `file_type`: (Optional) The file format for the saved plot (e.g., png, pdf, jpg).
+
+Returns: A list of two `ggplot` objects.
+
+##### Detailed Plot for Gene Mapping
+
+`create_ortholog_detailed_plot` is a tailored function for creating a detailed visualization of the logging data generated by the `map_orthologs` method in the proharmed package. This function produces a comprehensive plot that illustrates the intricate process of mapping orthologs from one organism to another, showcasing the critical steps and results achieved during this procedure.
+
+Parameters
+
+- `logging`: A DataFrame containing detailed logging data returned by the `map_orthologs` method of proharmed.
+- `organism`: The source organism used in the `map_orthologs` method.
+- `out_dir`: (Optional) The directory where the plot will be saved. If not specified, the plot is not saved but returned for display.
+- `file_type`: (Optional) The file format for the saved plot (options include 'png', 'pdf', 'jpg', etc.).
+
+Returns: A `ggplot` object.
+
+```{r map_orthologs_plots, message=FALSE, warning=FALSE}
+if(save_plots && !is.null(final_out_dir))
+{ out_dir=subdir } else { out_dir=NULL }
+
+file_type="png"
+
+# Generate and visualize the overview plot
+overview_plots <- proharmed::create_overview_plot(logging = orthologs_prot_results$Overview_Log, 
+                                                  out_dir = out_dir, file_type = file_type)
+print(overview_plots[[1]]) # Distribution of number of entries per line
+print(overview_plots[[2]]) # Number of entries added and removed - removed genes could not be mapped to orthologs, they were not actually removed
+
+# Generate and visualize the detailed reduced gene names plot [needs fix]
+detailed_plot <- proharmed::create_ortholog_detailed_plot(logging = orthologs_prot_results$Detailed_Log, 
+                                                          organism = organism, 
+                                                          out_dir = out_dir, file_type = file_type)
+print(detailed_plot) # Number of entries removed by cause
+```
+
+
+
