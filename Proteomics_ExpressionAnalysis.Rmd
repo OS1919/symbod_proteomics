@@ -369,3 +369,16 @@ de_results_sig_subsets <- split(de_results_sig, de_results_sig$Comparison)
 
 write.csv(de_results_sig, file.path(final_out_dir, "de_results_significant.csv"), row.names = FALSE)
 ```
+
+```{r}
+# Count total significant DEPs
+total_sig_deps <- nrow(de_results_sig)
+cat("=== SUMMARY OF DIFFERENTIALLY EXPRESSED PROTEINS ===\n\n")
+cat("Total significant DEPs across all comparisons:", total_sig_deps, "\n\n")
+
+# Count DEPs per comparison
+cat("DEPs per comparison:\n")
+deps_per_comparison <- table(de_results_sig$Comparison)
+print(deps_per_comparison)
+cat("\n")
+```
