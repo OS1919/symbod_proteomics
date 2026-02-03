@@ -255,16 +255,12 @@ run_DE_with_filtering <- function(se, comparisons, condition_column, min_samples
                        comparisons = comparison,  # Single comparison
                        ain = assay_to_use,
                        condition = condition_column,
-                       DE_method = "limma", 
-                       DEqMS_PSMs_column = "PSM", 
-                       covariate = NULL, 
+                       DE_method = "limma",
                        logFC = TRUE, 
                        logFC_up = 1,
                        logFC_down = -1, 
                        p_adj = TRUE, 
-                       alpha = 0.05, 
-                       B = 100, 
-                       K = 500 
+                       alpha = 0.05
                        )
     
     # Combine results
