@@ -270,7 +270,6 @@ overview_plots <- proharmed::create_overview_plot(logging = remapped_prot_result
                                                   out_dir = out_dir, file_type = file_type)
 print(overview_plots[[1]]) # Distribution of number of entries per line
 print(overview_plots[[2]]) # Number of entries added and removed
-
 ```
 
 ### Reduce Gene Names
@@ -460,6 +459,15 @@ detailed_plot <- proharmed::create_ortholog_detailed_plot(logging = orthologs_pr
                                                           out_dir = out_dir, file_type = file_type)
 print(detailed_plot) # Number of entries removed by cause
 ```
-
+```{r}
+# Final summary at the end of the script
+cat("\n=== HARMONIZATION SUMMARY ===\n")
+cat("Initial dataset:", nrow(prot_data), "proteins\n")
+cat("After filtering (removed non-rat and contaminants):", nrow(filtered_prot_data), "proteins\n")
+cat("After gene name remapping:", nrow(remapped_prot_data), "proteins\n")
+cat("After Ensembl reduction (removed proteins without canonical IDs):", nrow(reduced_prot_data), "proteins\n")
+cat("After ortholog mapping:", nrow(orthologs_prot_data), "proteins\n")
+cat("\nTotal proteins removed:", nrow(prot_data) - nrow(orthologs_prot_data), "\n")
+```
 
 
