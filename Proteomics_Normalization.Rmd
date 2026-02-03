@@ -902,7 +902,6 @@ if(save_plots && !is.null(final_out_dir)){
 print(p_heat_post_norm)
 ```
 
-
 ## Scaling
 ```{r}
 scale_se <- function(se_data){
@@ -941,6 +940,22 @@ scale_se <- function(se_data){
     if (length(nondiabetic_ctrl42_cols) > 0) {
       nondiabetic_ctrl42_medians <- apply(dt[, nondiabetic_ctrl42_cols, drop = FALSE], 1, median, na.rm = TRUE)
     }
+    
+    diabetic_valid <- !is.na(diabetic_ctrl42_medians) & 
+                 !is.nan(diabetic_ctrl42_medians) & 
+                 !is.infinite(diabetic_ctrl42_medians)
+    
+    nondiabetic_valid <- !is.na(nondiabetic_ctrl42_medians) & 
+                        !is.nan(nondiabetic_ctrl42_medians) & 
+                        !is.infinite(nondiabetic_ctrl42_medians)
+    
+    cat(sprintf("\nScaling statistics for assay '%s':\n", ain))
+    cat(sprintf("  Proteins with valid diabetic ctrl_42 median: %d / %d (%.1f%%)\n", 
+                sum(diabetic_valid), length(diabetic_valid), 
+                100 * sum(diabetic_valid) / length(diabetic_valid)))
+    cat(sprintf("  Proteins with valid nondiabetic ctrl_42 median: %d / %d (%.1f%%)\n", 
+                sum(nondiabetic_valid), length(nondiabetic_valid), 
+                100 * sum(nondiabetic_valid) / length(nondiabetic_valid)))
 
     # Iterate over each unique animal in the experiment
     for (animal in unique(coldata$Animal)){
