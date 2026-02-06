@@ -295,30 +295,6 @@ for(i in 1:min(10, nrow(extreme_fc))) {
 }
 ###################################################################
 
-# DEBUG: Check what's happening with protein lookups
-test_protein <- deps_as$Protein.IDs[1]  # Take first AS DEP
-cat("Testing protein:", test_protein, "\n")
-
-cat("Protein exists in ai_data_unscaled:", test_protein %in% ai_data_unscaled$Protein.IDs, "\n")
-cat("Protein exists in as_data_unscaled:", test_protein %in% as_data_unscaled$Protein.IDs, "\n")
-
-# Test the actual lookup
-test_samples <- group1_samples  # or comparison_samples
-test_abundances <- get_fraction_abundances(test_protein, test_samples, ai_data_unscaled, as_data_unscaled)
-cat("AI abundances length:", length(test_abundances$ai_abundances), "\n")
-cat("AS abundances length:", length(test_abundances$as_abundances), "\n")
-
-# Check what columns are being looked up
-cat("First Column_AI:", test_samples$Column_AI[1], "\n")
-cat("This column exists in ai_data_unscaled:", test_samples$Column_AI[1] %in% names(ai_data_unscaled), "\n")
-
-# Check the actual row
-matching_row <- ai_data_unscaled[ai_data_unscaled$Protein.IDs == test_protein, ]
-cat("Matching rows in ai_data_unscaled:", nrow(matching_row), "\n")
-if(nrow(matching_row) > 0) {
-  cat("Value in first sample column:", matching_row[[test_samples$Column_AI[1]]], "\n")
-}
-
 ###################################################################
 # ============================================================================
 # MAIN THRESHOLD TESTING LOOPS
@@ -403,21 +379,6 @@ for (fc_thresh in fc_thresholds) {
                                                                      ai_data_unscaled, as_data_unscaled)
       group2_ratios <- calculate_group_ratios_and_exclusive_proteins(group2_samples, ai_data, as_data,
                                                                      ai_data_unscaled, as_data_unscaled)
-      
-      # DEBUG: Check what calculate_group_ratios_and_exclusive_proteins returns
-      cat("\n=== DEBUG: Exclusivity check ===\n")
-      cat("Number of AI exclusive proteins (group1):", length(group1_ratios$ai_exclusive), "\n")
-      cat("Number of AS exclusive proteins (group1):", length(group1_ratios$as_exclusive), "\n")
-      
-      # Check if our test protein is in the exclusive list (it shouldn't be!)
-      test_protein <- deps_as$Protein.IDs[1]
-      cat("Test protein:", test_protein, "\n")
-      cat("Test protein in AS exclusive list (group1):", test_protein %in% group1_ratios$as_exclusive, "\n")
-      
-      # Check the ratios dataframe for this protein
-      test_ratio <- group1_ratios$ratios[group1_ratios$ratios$Protein.IDs == test_protein, ]
-      cat("Fraction_Status for test protein:", test_ratio$Fraction_Status, "\n")
-      cat("=== END DEBUG ===\n\n")
       
       # Compare ratios
       ratio_comparison <- inner_join(
