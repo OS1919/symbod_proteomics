@@ -24,14 +24,10 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 # Read protein abundance data
 abundance_file_AI_unscaled <- "normalization_results_AI/RobNorm_normalized_data.csv"
 abundance_file_AS_unscaled <- "normalization_results_AS/RobNorm_normalized_data.csv"
-abundance_file_AI <- "normalization_results_AI/scaled/RobNorm_scaled_normalized_data.csv"
-abundance_file_AS <- "normalization_results_AS/scaled/RobNorm_scaled_normalized_data.csv"
-metadata_file_AI <- "normalization_results_AI/scaled/meta_data.csv"
-metadata_file_AS <- "normalization_results_AS/scaled/meta_data.csv"
+metadata_file_AI <- "normalization_results_AI/meta_data.csv"
+metadata_file_AS <- "normalization_results_AS/meta_data.csv"
 ai_data_unscaled <- read.csv(abundance_file_AI_unscaled, stringsAsFactors = FALSE, check.names = FALSE)
 as_data_unscaled <- read.csv(abundance_file_AS_unscaled, stringsAsFactors = FALSE, check.names = FALSE)
-ai_data <- read.csv(abundance_file_AI, stringsAsFactors = FALSE, check.names = FALSE)
-as_data <- read.csv(abundance_file_AS, stringsAsFactors = FALSE, check.names = FALSE)
 meta_ai <- read.csv(metadata_file_AI, stringsAsFactors = FALSE)
 meta_as <- read.csv(metadata_file_AS, stringsAsFactors = FALSE)
 
@@ -104,28 +100,23 @@ get_fraction_abundances <- function(protein, samples, ai_data, as_data) {
 }
 
 # Function to calculate AI/AS ratios for a group of samples and get fraction-exclusive proteins
-calculate_group_ratios_and_exclusive_proteins <- function(samples, ai_data, as_data, 
-                                                          ai_data_unscaled, as_data_unscaled) {
+calculate_group_ratios_and_exclusive_proteins <- function(samples, ai_data_unscaled, as_data_unscaled) {
   protein_ratios <- data.frame()
   ai_exclusive_proteins <- character()
   as_exclusive_proteins <- character()
   
   # Get all unique proteins from both fractions
-  all_proteins <- unique(c(ai_data$Protein.IDs, as_data$Protein.IDs))
+  all_proteins <- unique(c(ai_data_unscaled$Protein.IDs, as_data_unscaled$Protein.IDs))
   
   for (protein_id in all_proteins) {
     abundances_unscaled = get_fraction_abundances(protein_id, samples, ai_data_unscaled, as_data_unscaled)
     ai_abundances_unscaled = abundances_unscaled$ai_abundances
     as_abundances_unscaled = abundances_unscaled$as_abundances
     
-    abundances = get_fraction_abundances(protein_id, samples, ai_data, as_data)
-    ai_abundances = abundances$ai_abundances
-    as_abundances = abundances$as_abundances
-    
-    if (length(as_abundances) > 0 && length(ai_abundances) > 0) {
+    if (length(ai_abundances_unscaled) > 0 && length(as_abundances_unscaled) > 0) {
       # PROTEIN IS MEASURED IN AT LEAST ONE SAMPLE IN BOTH FRACTIONS - calculate ratio
-      mean_ai <- mean(ai_abundances, na.rm = TRUE)
-      mean_as <- mean(as_abundances, na.rm = TRUE)
+      mean_ai <- mean(ai_abundances_unscaled, na.rm = TRUE)
+      mean_as <- mean(as_abundances_unscaled, na.rm = TRUE)
       # THIS LINE NAIVELY ASSUMES THAT THE SUM OF BOTH FRACTIONS IS EQUAL TO THE TOTAL INTENSITY
       # THIS IS TECHNICALLY NOT CORRECT
       total <- mean_ai + mean_as
@@ -183,15 +174,15 @@ for (i in 1:nrow(matched_samples)) {
   
   # Get AI data for this sample
   ai_sample <- data.frame(
-    Protein.IDs = ai_data$Protein.IDs,
-    AI_abundance = as.numeric(ai_data[[ai_col]]),
+    Protein.IDs = ai_data_unscaled$Protein.IDs,
+    AI_abundance = as.numeric(ai_data_unscaled[[ai_col]]),
     stringsAsFactors = FALSE
   )
   
   # Get AS data for this sample
   as_sample <- data.frame(
-    Protein.IDs = as_data$Protein.IDs,
-    AS_abundance = as.numeric(as_data[[as_col]]),
+    Protein.IDs = as_data_unscaled$Protein.IDs,
+    AS_abundance = as.numeric(as_data_unscaled[[as_col]]),
     stringsAsFactors = FALSE
   )
   
@@ -319,6 +310,7 @@ for (fc_thresh in fc_thresholds) {
     
     # Initialize validated deps list for THIS threshold combination
     all_validated_deps <- list()
+    dominant_removed <- list()
     
     # ========================================================================
     # Loop through comparisons
@@ -350,18 +342,18 @@ for (fc_thresh in fc_thresholds) {
       # ======================================================================
       comparison_fc <- data.frame()
       
-      all_proteins <- unique(c(ai_data$Protein.IDs, as_data$Protein.IDs))
+      all_proteins <- unique(c(ai_data_unscaled$Protein.IDs, as_data_unscaled$Protein.IDs))
       
       for (protein_id in all_proteins) {
         # Get abundances using scaled data
-        abundances <- get_fraction_abundances(protein_id, comparison_samples, ai_data, as_data)
-        ai_abundances <- abundances$ai_abundances
-        as_abundances <- abundances$as_abundances
+        abundances <- get_fraction_abundances(protein_id, comparison_samples, ai_data_unscaled, as_data_unscaled)
+        ai_abundances_unscaled <- abundances$ai_abundances
+        as_abundances_unscaled <- abundances$as_abundances
         
         # Calculate fold change if protein is in both fractions
-        if (length(ai_abundances) > 0 && length(as_abundances) > 0) {
-          mean_ai <- mean(ai_abundances, na.rm = TRUE)
-          mean_as <- mean(as_abundances, na.rm = TRUE)
+        if (length(ai_abundances_unscaled) > 0 && length(as_abundances_unscaled) > 0) {
+          mean_ai <- mean(ai_abundances_unscaled, na.rm = TRUE)
+          mean_as <- mean(as_abundances_unscaled, na.rm = TRUE)
           
           comparison_fc <- rbind(comparison_fc, data.frame(
             Protein.IDs = protein_id,
@@ -375,10 +367,8 @@ for (fc_thresh in fc_thresholds) {
       # ======================================================================
       # Calculate ratios for both groups in this comparison
       # ======================================================================
-      group1_ratios <- calculate_group_ratios_and_exclusive_proteins(group1_samples, ai_data, as_data,
-                                                                     ai_data_unscaled, as_data_unscaled)
-      group2_ratios <- calculate_group_ratios_and_exclusive_proteins(group2_samples, ai_data, as_data,
-                                                                     ai_data_unscaled, as_data_unscaled)
+      group1_ratios <- calculate_group_ratios_and_exclusive_proteins(group1_samples, ai_data_unscaled, as_data_unscaled)
+      group2_ratios <- calculate_group_ratios_and_exclusive_proteins(group2_samples, ai_data_unscaled, as_data_unscaled)
       
       # Compare ratios
       ratio_comparison <- inner_join(
@@ -417,7 +407,7 @@ for (fc_thresh in fc_thresholds) {
         fc_info <- comparison_fc[comparison_fc$Protein.IDs == protein, ]
         fc_between <- ifelse(nrow(fc_info) > 0, fc_info$FC_between_fractions[1], NA)
         # fc_info$FC_between_fractions[1] to make sure we get NA if there is no value
-        
+     
         # Validation logic
         is_valid <- FALSE
         validation_reason <- ""
@@ -465,6 +455,7 @@ for (fc_thresh in fc_thresholds) {
       # ======================================================================
       # Filter second-level validated DEPs by ratio consistency
       # ======================================================================
+      n_dominant_before_stability <- sum(grepl("Dominant", validated_deps$Validation))
       if(nrow(validated_deps) > 0) {
         validated_deps <- validated_deps %>%
           left_join(ratio_comparison %>% 
@@ -488,7 +479,9 @@ for (fc_thresh in fc_thresholds) {
         validated_deps$Comparison <- comp
         validated_deps$Comparison_Label <- comparisons_of_interest[comp]
       }
+      
       all_validated_deps[[comp]] <- validated_deps
+      dominant_removed[[comp]] <- n_dominant_before_stability - sum(grepl("Dominant", validated_deps$Validation))
       
       cat("  Total unique DEPs (AI+AS):", length(all_deps), "\n")
       cat("  Validated DEPs:", nrow(validated_deps), "\n")
@@ -572,6 +565,7 @@ for (fc_thresh in fc_thresholds) {
         Validated_Exclusive = n_exclusive,
         Validated_Dominant = n_dominant,
         Validated_Total = validated_count,
+        Dominant_Removed_By_Stability = dominant_removed[[comp]],
         Overlap_First_Level = overlap_first_level,
         Overlap_Second_Level = overlap_second_level,
         FC_Threshold = fc_thresh,
@@ -649,7 +643,7 @@ for (fc_thresh in fc_thresholds) {
     )
     
     cat("\n=== Completed FC", fc_thresh, "Stab", stab_thresh, "===\n")
-  }
+    }
 }
 
 cat("\n\n========================================")
