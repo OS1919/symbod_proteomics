@@ -73,13 +73,13 @@ parse_group <- function(group_str) {
   return(list(condition = condition, scaffold = scaffold, timepoint = timepoint))
 }
 
-get_fraction_abundances <- function(protein, samples, ai_data, as_data) {
+get_fraction_abundances <- function(protein, samples, ai_data_unscaled, as_data_unscaled) {
   # Get AI abundances
   ai_abundances <- numeric()
   for (i in 1:nrow(samples)) { # The number of samples
     ai_col <- samples$Column_AI[i] # Get column name for the i-th sample
     # Select ai abundance value for this protein
-    ai_value <- as.numeric(ai_data[ai_data$Protein.IDs == protein, ai_col])
+    ai_value <- as.numeric(ai_data_unscaled[ai_data_unscaled$Protein.IDs == protein, ai_col])
     if (length(ai_value) > 0 && !is.na(ai_value)) {
       # There is a value measured
       ai_abundances <- c(ai_abundances, 2^ai_value)
@@ -90,7 +90,7 @@ get_fraction_abundances <- function(protein, samples, ai_data, as_data) {
   as_abundances <- numeric()
   for (i in 1:nrow(samples)) {
     as_col <- samples$Column_AS[i]
-    as_value <- as.numeric(as_data[as_data$Protein.IDs == protein, as_col])
+    as_value <- as.numeric(as_data_unscaled[as_data_unscaled$Protein.IDs == protein, as_col])
     if (length(as_value) > 0 && !is.na(as_value)) {
       as_abundances <- c(as_abundances, 2^as_value)
     }
@@ -291,7 +291,7 @@ for(i in 1:min(10, nrow(extreme_fc))) {
 # MAIN THRESHOLD TESTING LOOPS
 # ============================================================================
 
-fc_thresholds <- c(2.07, 2.49, 3.38)
+fc_thresholds <- c(4.04, 5.6, 9.36)
 stability_thresholds <- c(3, 5, 7)
 
 # Store all results across all threshold combinations
@@ -311,6 +311,7 @@ for (fc_thresh in fc_thresholds) {
     # Initialize validated deps list for THIS threshold combination
     all_validated_deps <- list()
     dominant_removed <- list()
+    tested_second_level_per_comp <- list()
     
     # ========================================================================
     # Loop through comparisons
@@ -345,7 +346,6 @@ for (fc_thresh in fc_thresholds) {
       all_proteins <- unique(c(ai_data_unscaled$Protein.IDs, as_data_unscaled$Protein.IDs))
       
       for (protein_id in all_proteins) {
-        # Get abundances using scaled data
         abundances <- get_fraction_abundances(protein_id, comparison_samples, ai_data_unscaled, as_data_unscaled)
         ai_abundances_unscaled <- abundances$ai_abundances
         as_abundances_unscaled <- abundances$as_abundances
@@ -387,6 +387,7 @@ for (fc_thresh in fc_thresholds) {
       all_deps <- unique(c(deps_ai$Protein.IDs, deps_as$Protein.IDs))
       
       validated_deps <- data.frame()
+      tested_second_level <- 0
       
       for(protein in all_deps) {
         # Check if protein is fraction-exclusive
@@ -423,10 +424,13 @@ for (fc_thresh in fc_thresholds) {
             is_valid <- TRUE
             validation_reason <- "Significant in both fractions (same direction)"
           }
-        } else if((in_ai | in_as) & !(in_ai & in_as) & !is.na(fc_between) & fc_between >= fc_thresh) {
-          is_valid <- TRUE
-          validation_reason <- paste0("Dominant in ", ifelse(in_ai, "AI", "AS"), 
+        } else if((in_ai | in_as) & !(in_ai & in_as) & !is.na(fc_between)) {
+          tested_second_level <- tested_second_level + 1
+          if (fc_between >= fc_thresh)  {
+            is_valid <- TRUE
+            validation_reason <- paste0("Dominant in ", ifelse(in_ai, "AI", "AS"), 
                                       " fraction (FC=", round(fc_between, 2), ")")
+          }
         }
         
         if(is_valid) {
@@ -482,6 +486,7 @@ for (fc_thresh in fc_thresholds) {
       
       all_validated_deps[[comp]] <- validated_deps
       dominant_removed[[comp]] <- n_dominant_before_stability - sum(grepl("Dominant", validated_deps$Validation))
+      tested_second_level_per_comp[[comp]] <- tested_second_level
       
       cat("  Total unique DEPs (AI+AS):", length(all_deps), "\n")
       cat("  Validated DEPs:", nrow(validated_deps), "\n")
@@ -566,6 +571,7 @@ for (fc_thresh in fc_thresholds) {
         Validated_Dominant = n_dominant,
         Validated_Total = validated_count,
         Dominant_Removed_By_Stability = dominant_removed[[comp]],
+        DEPs_Tested_Second_Level = tested_second_level_per_comp[[comp]],
         Overlap_First_Level = overlap_first_level,
         Overlap_Second_Level = overlap_second_level,
         FC_Threshold = fc_thresh,
