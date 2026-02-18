@@ -14,7 +14,7 @@ setwd("/home/ole/symbod_proteomics")
 base_output_dir <- "valid_DEPs/"
 
 # Define the threshold combinations to process
-fc_thresholds <- c(2.07, 2.49, 3.38)
+fc_thresholds <- c(4.04, 5.6, 9.36)
 stability_thresholds <- c(3, 5, 7)
 
 # Paths to full DE results for background universe
@@ -320,7 +320,12 @@ for (fc_thresh in fc_thresholds) {
             Total_Genes_Tested = genes_tested,  # Entrez IDs actually tested
             Exception_Proteins = ifelse(set_name == "set2_first_plus_network", 
                                         length(exception_genes %||% character(0)), 0),
-            Exception_Proteins_Tested = exception_entrez_count,
+            Exception_Proteins_Rat = ifelse(set_name == "set2_first_plus_network",
+                                            length(exception_rat %||% character(0)), 0),
+            Exception_Proteins_Entrez = ifelse(set_name == "set2_first_plus_network",
+                                               exception_entrez_count, 0),
+            Exception_Proteins_Tested = ifelse(set_name == "set2_first_plus_network",
+                                               exception_entrez_count, 0),
             Background_Universe = length(current_background),
             Enrichment_Performed = !is.null(enrichment_results),
             Significant_Pathways = n_significant
