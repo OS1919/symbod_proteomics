@@ -34,7 +34,7 @@ set.seed(seed)
 ```{r config}
 prot_file <- "harmonization_results/map_orthologs/Modified_Data.csv"
 meta_file <- "input/SampleDescription.csv"
-fraction_to_keep <- "AI"  # Set to "AI" or "AS"
+fraction_to_keep <- "AS"  # Set to "AI" or "AS"
 
 save_plots <- TRUE
 # Define the final output directory
@@ -285,8 +285,6 @@ se <- load_data(data = prot_data, md = md,
                 ref_samples = NULL, 
                 batch_column = NULL, condition_column = NULL, label_column = "Label")
 
-# Remove raw assay since normalization should work on log2 data
-#assays(se)[["raw"]] <- NULL
 print(names(assays(se)))
 ```
 
@@ -347,7 +345,7 @@ After filtering the proteomics dataset, analyzing the pattern of missing values 
 ```{r filter_proteins_plot, warning=FALSE}
 # check NA pattern
 p1 <- plot_NA_density(se)
-p2 <- plot_NA_heatmap(se, label_by = "No", color_by = NULL, 
+p2 <- plot_NA_heatmap(se, label_by = "No", color_by = "No", 
                       cluster_samples = TRUE, cluster_proteins = TRUE, 
                       show_row_dend = TRUE, show_column_dend = FALSE)
 
@@ -362,33 +360,6 @@ if(save_plots && !is.null(final_out_dir)){
 for (p in list(p1, p2)){
   print(p)
 }
-```
-
-## Outlier detection using POMA
-```{r}
-# Find outliers by "Condition"
-args(POMA::PomaOutliers)
-outliers_result <- POMA::PomaOutliers(se, 
-                                      method = "euclidean", 
-                                      type = "median",
-                                      outcome = "Condition",
-                                      coef = 2,
-                                      labels = FALSE) 
-print(outliers_result$distance_boxplot)
-outlier_samples_condition <- outliers_result$outliers
-print(outlier_samples_condition)
-
-# Find outliers by "Scaffold"
-args(POMA::PomaOutliers)
-outliers_result <- POMA::PomaOutliers(se, 
-                                      method = "euclidean", 
-                                      type = "median",
-                                      outcome = "Scaffold",
-                                      coef = 2,
-                                      labels = FALSE) 
-print(outliers_result$distance_boxplot)
-outlier_samples_scaffold <- outliers_result$outliers
-print(outlier_samples_scaffold)
 ```
 
 ## Pre-normalization visualization
@@ -414,12 +385,16 @@ print(p_pre_pca_cond)
 
 # Perform Normalization
 ```{r normalize}
+# Remove raw assay since normalization should work on log2 data
+assays(se)[["raw"]] <- NULL
+print(names(assays(se)))
+
 # See what normalization methods are actually available
 available_methods <- get_normalization_methods()
 print(available_methods)
 
 # Define normalization methods
-normalization_methods <- c("RobNorm", "LoessF", "MAD", "Median", "Quantile")
+normalization_methods <- c("RobNorm", "LoessF", "MAD", "Quantile")
 
 # Normalize the SummarizedExperiment object
 # Normalizes all assays in the object - which should just be the log2 one at this point
@@ -1050,7 +1025,7 @@ for (p in list(p1, p2)){
 desired_norm <- "RobNorm_scaled"
 ```
 
-## Detect outliers again
+## Detect outliers
 ```{r}
 # Create SE object with only RobNorm data for outlier detection
 se_robnorm_only <- se_scaled
@@ -1059,9 +1034,7 @@ assays(se_robnorm_only) <- assays(se_robnorm_only)[desired_norm]  # Keep only de
 # Now run outlier detection on normalized data
 outliers_result_robnorm <- POMA::PomaOutliers(se_robnorm_only,
                                       method = "euclidean", 
-                                      type = "median",
                                       outcome = "Condition",
-                                      coef = 2,
                                       labels = FALSE)
 
 print(outliers_result_robnorm$distance_boxplot)
@@ -1070,9 +1043,7 @@ print(outlier_samples_robnorm)
 
 outliers_result_robnorm <- POMA::PomaOutliers(se_robnorm_only,
                                       method = "euclidean", 
-                                      type = "median",
                                       outcome = "Scaffold",
-                                      coef = 2,
                                       labels = FALSE)
 
 print(outliers_result_robnorm$distance_boxplot)
