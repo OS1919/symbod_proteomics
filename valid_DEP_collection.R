@@ -233,17 +233,18 @@ cat("  80th:", round(p80, 2), "\n")
 cat("  90th:", round(p90, 2), "\n")
 cat("  Max:", round(max(complete_fcs_proteinwise$Fold_Change), 2), "\n\n")
 
+p99 <- quantile(complete_fcs_proteinwise$Fold_Change, 0.999)
+
 percentile_data <- data.frame(
   label = c("Median", "70th", "80th", "90th"),
   value = c(median_fc, p70, p80, p90),
   text = sprintf("%.2f", c(median_fc, p70, p80, p90))
 )
 
-plot <- ggplot(complete_fcs_proteinwise, aes(x = Fold_Change, fill = Dominant_Fraction)) +
-  geom_histogram(bins = 100, alpha = 0.7, color = "white", position = "dodge") +
-  geom_vline(data = percentile_data, aes(xintercept = value, color = label), 
-             linewidth = 1.2, linetype = "dashed") +
-  scale_fill_manual(values = c("AI" = "#2E86AB", "AS" = "#E63946")) +
+plot <- ggplot(complete_fcs_proteinwise, aes(x = Fold_Change)) +
+  geom_histogram(bins = 80, fill = "#2E86AB", alpha = 0.85, color = "white") +
+  geom_vline(data = percentile_data, aes(xintercept = value, color = label),
+             linewidth = 1.5, linetype = "dashed") +
   scale_color_manual(
     values = c("Median" = "#FFB703", "70th" = "#06A77D", "80th" = "#D62828", "90th" = "#7209B7"),
     breaks = c("Median", "70th", "80th", "90th"),
@@ -252,22 +253,29 @@ plot <- ggplot(complete_fcs_proteinwise, aes(x = Fold_Change, fill = Dominant_Fr
       percentile_data$label
     )
   ) +
-  scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 500, 1000)) +
+  scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 500)) +
+  coord_cartesian(xlim = c(1, p99)) +
   labs(
     title = "AI vs AS Fold Change Distribution",
-    subtitle = paste0("Every protein in every sample (n = ", nrow(complete_fcs_proteinwise), ")"),
-    x = "Fold Change (Larger / Smaller)",
+    subtitle = paste0("Every protein in every sample (n = ", nrow(complete_fcs_proteinwise),
+                      "; top 0.1% extreme ratios not shown)"),
+    x = "Abundance Ratio (Larger / Smaller)",
     y = "Count",
-    color = "Percentiles",
-    fill = "Dominant Fraction"
+    color = "Percentiles"
   ) +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
-    plot.title = element_text(face = "bold", size = 14),
-    legend.position = "right"
+    plot.title    = element_text(face = "bold", size = 20),
+    plot.subtitle = element_text(size = 13, color = "grey40"),
+    axis.title    = element_text(size = 16),
+    axis.text     = element_text(size = 14),
+    legend.title  = element_text(size = 15),
+    legend.text   = element_text(size = 14),
+    legend.position = "right",
+    panel.grid    = element_blank()
   )
 
-ggsave(file.path(output_dir, "FC_distribution_separated.png"), plot, width = 12, height = 7, dpi = 300)
+ggsave(file.path(output_dir, "FC_distribution.png"), plot, width = 12, height = 7, dpi = 300)
 
 # Find proteins with extreme fold changes
 extreme_fc <- complete_fcs_proteinwise %>%
