@@ -244,8 +244,7 @@ for (i in 1:min(10, nrow(extreme_fc))) {
 fc_thresholds        <- c(4.04, 5.6, 9.36)
 # Stability threshold = max allowed ratio between the two groups' geo-mean FCs.
 # e.g. 1.25 means "the larger group's AI/AS separation is at most 1.25-fold the smaller's".
-# Old percentage-point thresholds (3/5/7) are not directly comparable; retune as needed.
-stability_thresholds <- c(1.1, 1.25, 1.5)
+stability_thresholds <- c(1.1, 1.2, 1.3)
 
 all_threshold_results <- list()
 
@@ -262,8 +261,9 @@ for (fc_thresh in fc_thresholds) {
     all_validated_deps              <- list()
     dominant_removed                <- list()
     tested_second_level_per_comp    <- list()
-    unstable_one_fraction_per_comp  <- list()
-    unstable_both_opposite_per_comp <- list()
+    unstable_ai_only_nonexclusive_per_comp <- list()
+    unstable_as_only_nonexclusive_per_comp <- list()
+    unstable_both_opposite_per_comp        <- list()
     
     for (comp in names(comparisons_of_interest)) {
       cat("\nProcessing:", comparisons_of_interest[comp], "\n")
@@ -394,18 +394,25 @@ for (fc_thresh in fc_thresholds) {
       }
       
       # Diagnostic: unstable DEPs by category
-      n_unstable_one_fraction  <- sum(validation_table$is_unstable_between_groups &
-                                        validation_table$dep_type %in% c("AI_only", "AS_only"),
-                                      na.rm = TRUE)
-      n_unstable_both_opposite <- sum(validation_table$is_unstable_between_groups &
-                                        validation_table$dep_type == "Both_opposite",
-                                      na.rm = TRUE)
+      # AI_only / AS_only exclude proteins that are fraction-exclusive across the comparison
+      n_unstable_ai_only_nonexclusive <- sum(validation_table$is_unstable_between_groups &
+                                               validation_table$dep_type == "AI_only" &
+                                               !validation_table$ai_exclusive,
+                                             na.rm = TRUE)
+      n_unstable_as_only_nonexclusive <- sum(validation_table$is_unstable_between_groups &
+                                               validation_table$dep_type == "AS_only" &
+                                               !validation_table$as_exclusive,
+                                             na.rm = TRUE)
+      n_unstable_both_opposite        <- sum(validation_table$is_unstable_between_groups &
+                                               validation_table$dep_type == "Both_opposite",
+                                             na.rm = TRUE)
       
       all_validated_deps[[comp]]              <- validated_deps
       dominant_removed[[comp]]                <- n_dominant_pre_stability - n_dominant_post_stability
       tested_second_level_per_comp[[comp]]    <- tested_second_level
-      unstable_one_fraction_per_comp[[comp]]  <- n_unstable_one_fraction
-      unstable_both_opposite_per_comp[[comp]] <- n_unstable_both_opposite
+      unstable_ai_only_nonexclusive_per_comp[[comp]] <- n_unstable_ai_only_nonexclusive
+      unstable_as_only_nonexclusive_per_comp[[comp]] <- n_unstable_as_only_nonexclusive
+      unstable_both_opposite_per_comp[[comp]]        <- n_unstable_both_opposite
       
       cat("  Total unique DEPs (AI+AS):", length(all_deps), "\n")
       cat("  Validated DEPs:", nrow(validated_deps), "\n")
@@ -454,7 +461,7 @@ for (fc_thresh in fc_thresholds) {
       if (validated_count > 0) {
         validated <- all_validated_deps[[comp]]
         n_both      <- sum(validated$Validation == "Significant in both fractions (same direction)")
-        n_dominant  <- sum(grepl("Dominant in", validated$Validation))
+        n_dominant_stable  <- sum(grepl("Dominant and stable in", validated$Validation))
         n_exclusive <- sum(grepl("Exclusive to", validated$Validation))
         
         first_level_proteins <- validated[
@@ -464,12 +471,12 @@ for (fc_thresh in fc_thresholds) {
         first_level_genes <- unique(first_level_genes)
         overlap_first_level <- sum(first_level_genes %in% meta_genes, na.rm = TRUE)
         
-        second_level_proteins <- validated[grepl("Dominant in", validated$Validation), ]
+        second_level_proteins <- validated[grepl("Dominant and stable in", validated$Validation), ]
         second_level_genes <- toupper(sapply(strsplit(as.character(second_level_proteins$Orthologs), ";"), `[`, 1))
         second_level_genes <- unique(second_level_genes)
         overlap_second_level <- sum(second_level_genes %in% meta_genes, na.rm = TRUE)
       } else {
-        n_both <- 0; n_dominant <- 0; n_exclusive <- 0
+        n_both <- 0; n_dominant_stable <- 0; n_exclusive <- 0
         overlap_first_level <- 0; overlap_second_level <- 0
       }
       
@@ -484,12 +491,13 @@ for (fc_thresh in fc_thresholds) {
         Overlap_Total                 = overlap_total,
         Validated_Both_Fractions      = n_both,
         Validated_Exclusive           = n_exclusive,
-        Validated_Dominant            = n_dominant,
+        Validated_Dominant            = n_dominant_stable,
         Validated_Total               = validated_count,
         Dominant_Removed_By_Stability = dominant_removed[[comp]],
         DEPs_Tested_Second_Level      = tested_second_level_per_comp[[comp]],
-        Unstable_DEPs_OneFraction     = unstable_one_fraction_per_comp[[comp]],
-        Unstable_DEPs_BothOpposite    = unstable_both_opposite_per_comp[[comp]],
+        Unstable_DEPs_AI_only_NonExclusive = unstable_ai_only_nonexclusive_per_comp[[comp]],
+        Unstable_DEPs_AS_only_NonExclusive = unstable_as_only_nonexclusive_per_comp[[comp]],
+        Unstable_DEPs_BothOpposite         = unstable_both_opposite_per_comp[[comp]],
         Overlap_First_Level           = overlap_first_level,
         Overlap_Second_Level          = overlap_second_level,
         FC_Threshold                  = fc_thresh,
