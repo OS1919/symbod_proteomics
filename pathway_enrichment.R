@@ -10,12 +10,14 @@ library(dplyr)
 
 setwd("/home/ole/symbod_proteomics")
 
+citation("org.Rn.eg.db")
+
 # Setup paths
 base_output_dir <- "valid_DEPs/"
 
 # Define the threshold combinations to process
 fc_thresholds <- c(4.04, 5.6, 9.36)
-stability_thresholds <- c(3, 5, 7)
+stability_thresholds <- c(1.1, 1.2, 1.3)
 
 # Paths to full DE results for background universe
 ai_base_path <- "de_analysis_results_AI_RobNorm_scaled/"
@@ -175,7 +177,7 @@ for (fc_thresh in fc_thresholds) {
       
       # Separate first-level and second-level
       first_level_deps <- comp_deps[grepl("both fractions|Exclusive", comp_deps$Validation), ]
-      second_level_deps <- comp_deps[grepl("Dominant in", comp_deps$Validation), ]
+      second_level_deps <- comp_deps[grepl("Dominant and stable", comp_deps$Validation), ]
       
       # Load comparison-specific exception proteins
       exception_file <- file.path("network_enrichment_results", comparison, "exception_proteins.csv")
