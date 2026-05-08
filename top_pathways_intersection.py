@@ -5,7 +5,7 @@ import os
 # CONFIGURATION
 # ============================================================================
 FC_THRESH = 5.6
-STAB_THRESH = 5
+STAB_THRESH = 1.2
 BASE_DIR = "valid_DEPs"
 BONE_FILE = "input/bone_enrichments_meta_analysis.csv"
 

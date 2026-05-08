@@ -9,7 +9,7 @@ drugstone.print_license()
 drugstone.accept_license()
 
 # Load the data
-df = pd.read_csv('valid_DEPs/FC2.49_Stab5/validated_DEPs.csv')
+df = pd.read_csv('valid_DEPs/FC5.6_Stab1.2/validated_DEPs.csv')
 
 print(f"Total proteins in file: {len(df)}")
 print(f"\nValidation categories:")
@@ -21,7 +21,8 @@ validation_filters = [
      "Exclusive to AI fraction",
      "Exclusive to AS fraction"
 ]
-comparison_filter = "diabetic_empty_42-nondiabetic_empty_42"
+comparison_filter = "diabetic_PCL_42-nondiabetic_PCL_42"
+#comparison_filter = "diabetic_empty_42-nondiabetic_empty_42"
 filtered_df = df[
     (df['Validation'].isin(validation_filters)) &
     (df['Comparison'] == comparison_filter)

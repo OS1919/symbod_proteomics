@@ -3,8 +3,10 @@ from scipy.stats import hypergeom
 import os
 
 # Configuration
-base_path = 'valid_DEPs/FC2.49_Stab5'
+base_path = 'valid_DEPs/FC5.6_Stab1.2'
 comparison = "diabetic_PCL_42-nondiabetic_PCL_42"
+#comparison = "diabetic_empty_42-nondiabetic_empty_42"
+
 
 # Load both fraction files
 ai_data = pd.read_csv('de_analysis_results_AI_RobNorm_scaled/de_results_raw.csv')
@@ -71,7 +73,6 @@ else:
     # SET 2: First-level + Network exception proteins
     set2_count = set1_count + len(exception_prots)
     set2_overlap = set1_overlap  + overlap_with_exceptions
-    print(f"1st-level valid DEPs + exception proteins: {set2_count}")
     set2_pval = hypergeom.sf(set2_overlap - 1, total_proteome_size, bone_caps_tested, set2_count)
 
     print(f"\nSet 2 (First-level + Network):")

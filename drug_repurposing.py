@@ -12,7 +12,7 @@ drugstone.accept_license()
 # CONFIGURATION
 # ============================================================================
 FC_THRESH = 5.6
-STAB_THRESH = 5
+STAB_THRESH = 1.2
 BASE_DIR = 'valid_DEPs'
 
 # Comparisons to analyze
