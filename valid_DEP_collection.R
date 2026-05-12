@@ -355,6 +355,10 @@ for (fc_thresh in fc_thresholds) {
           )
         )
       
+      write.csv(validation_table,
+                file.path(thresh_dir, paste0("validation_table_", comp, ".csv")),
+                row.names = FALSE)
+      
       # Counts
       tested_second_level       <- sum(validation_table$reached_second_level, na.rm = TRUE)
       n_dominant_pre_stability  <- sum(validation_table$qualifies_dominant, na.rm = TRUE)
