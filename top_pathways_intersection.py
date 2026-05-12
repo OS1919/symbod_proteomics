@@ -115,11 +115,13 @@ print(f"Validated by bone meta-analysis: {output_df['In_Bone_Meta'].sum()}")
 # COMBINED HEATMAP FIGURE
 # ============================================================================
 import matplotlib.pyplot as plt
+import matplotlib.cm as mcm
+import matplotlib.colors as mcolors
 import numpy as np
 
 output_df = pd.DataFrame(all_results)
 
-col_labels = ["First-level\nvalid DEPs", "First-level +\nnetwork-enriched", "First-level +\nsecond-level DEPs + \n(FC ≥ 5.6 & ΔRatio ≤ 5%)"]
+col_labels = ["First-level DEPs", "First-level DEPs +\nconnector\nproteins", "First-level DEPs +\nsecond-level DEPs + \n(AR ≥ 5.6 & ΔAR ≤ 1.2)"]
 comp_labels = {"diabetic_empty_42-nondiabetic_empty_42": "Empty defect",
                "diabetic_PCL_42-nondiabetic_PCL_42": "PCL scaffold"}
 
@@ -158,52 +160,60 @@ y_labels = [
 ]
 
 n_terms = len(all_terms)
-fig, axes = plt.subplots(1, 2, figsize=(14, max(5, n_terms * 0.55)),
-                         sharey=True)
-fig.subplots_adjust(wspace=0.05)
+
+row_labels = [
+    "First-level DEPs",
+    "First-level DEPs +\nconnector proteins",
+    "First-level DEPs +\nsecond-level DEPs\n(AR ≥ 5.6 & ΔAR ≤ 1.2)",
+]
+x_labels = [("★ " if t['bone'] else "") + t['description'] for t in all_terms]
+
+fig, axes = plt.subplots(2, 1, figsize=(max(12, n_terms * 2.0), 14),
+                         sharex=True)
+fig.subplots_adjust(hspace=0.35, bottom=0.30, left=0.22, right=0.93, top=0.95)
 
 for ax, comparison in zip(axes, COMPARISONS):
-    mat = matrices[comparison]
+    mat = matrices[comparison].T  # (3 sets, n_terms pathways)
 
-    # Grey background for missing terms
     bg = np.zeros_like(mat)
-    im = ax.imshow(bg, aspect='auto', cmap='Greys', vmin=0, vmax=1, alpha=0.15)
+    ax.imshow(bg, aspect='auto', cmap='Greys', vmin=0, vmax=1, alpha=0.15)
 
-    # Main heatmap — mask NaN cells
     masked = np.ma.masked_invalid(mat)
-    im = ax.imshow(masked, aspect='auto', cmap='Blues',
-                   vmin=0, vmax=vmax)
+    im = ax.imshow(masked, aspect='auto', cmap='Blues', vmin=0, vmax=vmax)
 
-    ax.set_xticks(range(3))
-    ax.set_xticklabels(col_labels, fontsize=9.5)
-    ax.xaxis.set_ticks_position('top')
-    ax.xaxis.set_label_position('top')
-    ax.set_title(comp_labels[comparison], fontsize=11, fontweight='bold', pad=38)
+    ax.set_yticks(range(3))
+    ax.set_yticklabels(row_labels, fontsize=12)
+    ax.set_title(comp_labels[comparison], fontsize=14, fontweight='bold', pad=8)
 
     # Cell annotations
     for i in range(mat.shape[0]):
         for j in range(mat.shape[1]):
             val = mat[i, j]
             if np.isnan(val):
-                ax.text(j, i, "n.s.", ha='center', va='center',
-                        fontsize=7.5, color='#aaaaaa')
+                ax.text(j, i, "x", ha='center', va='center',
+                        fontsize=11, color='#aaaaaa')
             else:
                 ax.text(j, i, f"{val:.1f}", ha='center', va='center',
-                        fontsize=8.5,
+                        fontsize=12,
                         color='white' if val > vmax * 0.6 else '#333333')
 
-# Y-axis labels only on left panel
-axes[0].set_yticks(range(n_terms))
-axes[0].set_yticklabels(y_labels, fontsize=9.5)
+# X-labels only on bottom panel
+axes[1].set_xticks(range(n_terms))
+axes[1].set_xticklabels(x_labels, fontsize=12, rotation=45, ha='right')
 
 # Shared colorbar
-cbar = fig.colorbar(im, ax=axes, shrink=0.5, pad=0.02)
-cbar.set_label("−log₁₀(adjusted p-value)", fontsize=9)
+sm = mcm.ScalarMappable(cmap='Blues', norm=mcolors.Normalize(vmin=0, vmax=vmax))
+sm.set_array([])
+cbar = fig.colorbar(sm, ax=axes, shrink=0.6, pad=0.02)
+cbar.set_label("−log₁₀(adjusted p-value)", fontsize=12)
+cbar.ax.tick_params(labelsize=11)
 
-fig.suptitle("Consistently top-enriched GO & KEGG terms across protein sets",
-             fontsize=12, fontweight='bold', y=1.04)
-fig.text(0.01, -0.03, "★ Validated by bone healing meta-analysis (Schmidt et al.)  |  n.s. = term not in top 10 for this comparison",
-         fontsize=8, style='italic')
+axes[1].annotate(
+    "★ Validated by bone healing meta-analysis (Schmidt et al.)  |  x = term not in top 10 for this comparison",
+    xy=(0, 0), xycoords='axes fraction',
+    xytext=(0, -0.55), textcoords='axes fraction',
+    fontsize=12, style='italic', annotation_clip=False, va='top',
+)
 
 out_path = os.path.join(thresh_dir, "heatmap_combined.png")
 plt.savefig(out_path, dpi=180, bbox_inches='tight')
