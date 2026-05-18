@@ -276,25 +276,27 @@ for (fc_thresh in fc_thresholds) {
         # Collect enrichment results (ALL pathways, not just significant)
         if (!is.null(enrichment_results)) {
           n_significant <- 0
+          n_total_tested <- 0
           for (category in c("BP", "MF", "CC", "KEGG")) {
             if (!is.null(enrichment_results[[category]])) {
               result_data <- enrichment_results[[category]]@result
-              
+
               if (nrow(result_data) > 0) {
                 # Add metadata columns
                 result_data$Category <- category
                 result_data$Comparison <- comparison
-                
+
                 # Add significance flag
                 result_data$Significant <- result_data$p.adjust < 0.05
-                
+
                 all_enrichment_results[[length(all_enrichment_results) + 1]] <- result_data
-                
-                # Count significant
+
+                # Count significant and total tested
                 n_sig <- sum(result_data$p.adjust < 0.05)
                 n_significant <- n_significant + n_sig
-                
-                cat("Found", n_sig, "significant /", nrow(result_data), 
+                n_total_tested <- n_total_tested + nrow(result_data)
+
+                cat("Found", n_sig, "significant /", nrow(result_data),
                     "tested", category, "terms for", comparison, "\n")
               }
             }
@@ -330,7 +332,8 @@ for (fc_thresh in fc_thresholds) {
                                                exception_entrez_count, 0),
             Background_Universe = length(current_background),
             Enrichment_Performed = !is.null(enrichment_results),
-            Significant_Pathways = n_significant
+            Significant_Pathways = n_significant,
+            Total_Pathways_Tested = n_total_tested
           )
           enrichment_summary <- rbind(enrichment_summary, summary_row)
         }
