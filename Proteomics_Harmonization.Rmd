@@ -388,7 +388,7 @@ The `map_orthologs` function from the `proharmed` package is designed to map gen
 
 ```{r map_orthologs}
 # Define the parameters
-gene_column <- "RemappedGeneNames"
+gene_column <- "ReducedGeneNames"
 organism <- "rat" 
 tar_organism <- "human"  #
 res_column <- "Orthologs"  # Column name for the results
@@ -486,14 +486,6 @@ count_proteins_per_fraction <- function(data, meta, fraction_col = "fraction", s
   }
 }
 
-# Before harmonization
-cat("=== INITIAL PROTEIN COUNTS ===\n")
-count_proteins_per_fraction(prot_data, meta_data)
-
-# After harmonization (at the end)
-cat("=== FINAL PROTEIN COUNTS AFTER HARMONIZATION ===\n")
-count_proteins_per_fraction(orthologs_prot_data, meta_data)
-
 cat("=== COLUMN NAME MATCHING CHECK ===\n")
 for (frac in unique(meta_data$fraction)) {
   frac_samples <- meta_data$sample_name[meta_data$fraction == frac]
@@ -508,4 +500,62 @@ for (frac in unique(meta_data$fraction)) {
 }
 ```
 
+```{r}
+cat("=== PROTEIN LOSS AT EACH HARMONIZATION STEP ===\n")
 
+steps <- list(
+  "Initial"            = prot_data,
+  "Filter protein IDs" = filtered_prot_data,
+  "Remap gene names"   = remapped_prot_data,
+  "Reduce gene names"  = reduced_prot_data,
+  "Map orthologs"      = orthologs_prot_data
+)
+
+count_per_fraction <- function(data, meta) {
+  counts <- c()
+  for (frac in c("AI", "AS")) {
+    frac_samples <- intersect(meta$sample_name[meta$fraction == frac], names(data))
+    if (is.data.table(data)) {
+      subset <- data[, frac_samples, with = FALSE]
+    } else {
+      subset <- data[, frac_samples, drop = FALSE]
+    }
+    has_value <- rowSums(!is.na(subset)) > 0
+    counts[frac] <- sum(has_value)
+  }
+  return(counts)
+}
+
+# Print header
+cat(sprintf("%-25s %8s %8s\n", "Step", "AI", "AS"))
+cat(strrep("-", 45), "\n")
+
+prev_counts <- NULL
+for (name in names(steps)) {
+  counts <- count_per_fraction(steps[[name]], meta_data)
+  
+  if (is.null(prev_counts)) {
+    cat(sprintf("%-25s %8d %8d\n", name, counts["AI"], counts["AS"]))
+  } else {
+    cat(sprintf("%-25s %8d %8d    (AI: -%d, AS: -%d)\n",
+                name,
+                counts["AI"], counts["AS"],
+                prev_counts["AI"] - counts["AI"],
+                prev_counts["AS"] - counts["AS"]))
+  }
+  prev_counts <- counts
+}
+
+cat(strrep("-", 45), "\n")
+initial_counts <- count_per_fraction(prot_data, meta_data)
+final_counts <- count_per_fraction(orthologs_prot_data, meta_data)
+cat(sprintf("%-25s %8d %8d\n", "Total removed",
+            initial_counts["AI"] - final_counts["AI"],
+            initial_counts["AS"] - final_counts["AS"]))
+
+cat("=== ZERO CHECK IN SAMPLE COLUMNS ===\n")
+sample_cols <- intersect(meta_data$sample_name, names(prot_data))
+
+total_zeros <- sum(prot_data[, ..sample_cols] == 0, na.rm = TRUE)
+cat(sprintf("Total zeros in sample columns: %d\n", total_zeros))
+```
