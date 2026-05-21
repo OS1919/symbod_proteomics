@@ -213,8 +213,8 @@ Modes:
 # Define the parameters
 mode <- "uniprot_one"  # Choose from 'all', 'fasta', 'uniprot', 'uniprot_primary', 'uniprot_one'
 protein_column <- "FilteredProteinIDs"
-gene_column <- "Genes"  # Previously "Gene Names" which is also the default
-res_column <- "RemappedGeneNames"  # Set to NULL to overwrite 'gene_column'
+gene_column <- "Genes"
+res_column <- "RemappedGeneNames" 
 skip_filled <- TRUE # Skip every row where a gene name is provided
 organism <- "rat"  
 fasta <- NULL  # Specify FASTA file path, if required
@@ -468,6 +468,44 @@ cat("After gene name remapping:", nrow(remapped_prot_data), "proteins\n")
 cat("After Ensembl reduction (removed proteins without canonical IDs):", nrow(reduced_prot_data), "proteins\n")
 cat("After ortholog mapping:", nrow(orthologs_prot_data), "proteins\n")
 cat("\nTotal proteins removed:", nrow(prot_data) - nrow(orthologs_prot_data), "\n")
+
+count_proteins_per_fraction <- function(data, meta, fraction_col = "fraction", sample_col = "sample_name") {
+  for (frac in unique(meta[[fraction_col]])) {
+    frac_samples <- meta[[sample_col]][meta[[fraction_col]] == frac]
+    frac_samples <- intersect(frac_samples, names(data))
+    
+    # Handle both data.table and data.frame
+    if (data.table::is.data.table(data)) {
+      subset <- data[, frac_samples, with = FALSE]
+    } else {
+      subset <- data[, frac_samples, drop = FALSE]
+    }
+    
+    has_value <- rowSums(!is.na(subset) & subset != 0) > 0
+    cat(sprintf("Proteins in %s fraction: %d\n", frac, sum(has_value)))
+  }
+}
+
+# Before harmonization
+cat("=== INITIAL PROTEIN COUNTS ===\n")
+count_proteins_per_fraction(prot_data, meta_data)
+
+# After harmonization (at the end)
+cat("=== FINAL PROTEIN COUNTS AFTER HARMONIZATION ===\n")
+count_proteins_per_fraction(orthologs_prot_data, meta_data)
+
+cat("=== COLUMN NAME MATCHING CHECK ===\n")
+for (frac in unique(meta_data$fraction)) {
+  frac_samples <- meta_data$sample_name[meta_data$fraction == frac]
+  found_in_data <- intersect(frac_samples, names(orthologs_prot_data))
+  not_found <- setdiff(frac_samples, names(orthologs_prot_data))
+  
+  cat(sprintf("\n%s fraction:\n", frac))
+  cat(sprintf("  Samples in metadata: %d\n", length(frac_samples)))
+  cat(sprintf("  Samples found in data: %d\n", length(found_in_data)))
+  cat(sprintf("  Samples NOT found in data: %d\n", length(not_found)))
+  if(length(not_found) > 0) print(not_found)
+}
 ```
 
 
