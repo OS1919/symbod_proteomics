@@ -246,7 +246,6 @@ fc_thresholds        <- c(4.04, 5.6, 9.36)
 # e.g. 1.25 means "the larger group's AI/AS separation is at most 1.25-fold the smaller's".
 stability_thresholds <- c(1.1, 1.2, 1.3)
 
-all_threshold_results <- list()
 
 for (fc_thresh in fc_thresholds) {
   for (stab_thresh in stability_thresholds) {
@@ -258,12 +257,9 @@ for (fc_thresh in fc_thresholds) {
     thresh_dir <- file.path(output_dir, paste0("FC", fc_thresh, "_Stab", stab_thresh))
     dir.create(thresh_dir, showWarnings = FALSE, recursive = TRUE)
     
-    all_validated_deps              <- list()
-    dominant_removed                <- list()
-    tested_second_level_per_comp    <- list()
-    unstable_ai_only_nonexclusive_per_comp <- list()
-    unstable_as_only_nonexclusive_per_comp <- list()
-    unstable_both_opposite_per_comp        <- list()
+    all_validated_deps           <- list()
+    dominant_removed             <- list()
+    tested_second_level_per_comp <- list()
     
     for (comp in names(comparisons_of_interest)) {
       cat("\nProcessing:", comparisons_of_interest[comp], "\n")
@@ -339,8 +335,7 @@ for (fc_thresh in fc_thresholds) {
             !(as_exclusive & is_dep_in_as),
           qualifies_dominant = reached_second_level & geo_mean_fc >= fc_thresh &
             !is.na(dominant_fraction) & dominant_fraction == single_fraction_dep,
-          is_stable_between_groups   = !is.na(GeoMeanFC_Ratio) & GeoMeanFC_Ratio <= stab_thresh,
-          is_unstable_between_groups = !is.na(GeoMeanFC_Ratio) & GeoMeanFC_Ratio >  stab_thresh,
+          is_stable_between_groups = !is.na(GeoMeanFC_Ratio) & GeoMeanFC_Ratio <= stab_thresh,
           Validation = case_when(
             ai_exclusive & is_dep_in_ai ~
               "Exclusive to AI fraction",
@@ -397,26 +392,9 @@ for (fc_thresh in fc_thresholds) {
         validated_deps$Comparison_Label <- comparisons_of_interest[comp]
       }
       
-      # Diagnostic: unstable DEPs by category
-      # AI_only / AS_only exclude proteins that are fraction-exclusive across the comparison
-      n_unstable_ai_only_nonexclusive <- sum(validation_table$is_unstable_between_groups &
-                                               validation_table$dep_type == "AI_only" &
-                                               !validation_table$ai_exclusive,
-                                             na.rm = TRUE)
-      n_unstable_as_only_nonexclusive <- sum(validation_table$is_unstable_between_groups &
-                                               validation_table$dep_type == "AS_only" &
-                                               !validation_table$as_exclusive,
-                                             na.rm = TRUE)
-      n_unstable_both_opposite        <- sum(validation_table$is_unstable_between_groups &
-                                               validation_table$dep_type == "Both_opposite",
-                                             na.rm = TRUE)
-      
-      all_validated_deps[[comp]]              <- validated_deps
-      dominant_removed[[comp]]                <- n_dominant_pre_stability - n_dominant_post_stability
-      tested_second_level_per_comp[[comp]]    <- tested_second_level
-      unstable_ai_only_nonexclusive_per_comp[[comp]] <- n_unstable_ai_only_nonexclusive
-      unstable_as_only_nonexclusive_per_comp[[comp]] <- n_unstable_as_only_nonexclusive
-      unstable_both_opposite_per_comp[[comp]]        <- n_unstable_both_opposite
+      all_validated_deps[[comp]]           <- validated_deps
+      dominant_removed[[comp]]             <- n_dominant_pre_stability - n_dominant_post_stability
+      tested_second_level_per_comp[[comp]] <- tested_second_level
       
       cat("  Total unique DEPs (AI+AS):", length(all_deps), "\n")
       cat("  Validated DEPs:", nrow(validated_deps), "\n")
@@ -499,9 +477,6 @@ for (fc_thresh in fc_thresholds) {
         Validated_Total               = validated_count,
         Dominant_Removed_By_Stability = dominant_removed[[comp]],
         DEPs_Tested_Second_Level      = tested_second_level_per_comp[[comp]],
-        Unstable_DEPs_AI_only_NonExclusive = unstable_ai_only_nonexclusive_per_comp[[comp]],
-        Unstable_DEPs_AS_only_NonExclusive = unstable_as_only_nonexclusive_per_comp[[comp]],
-        Unstable_DEPs_BothOpposite         = unstable_both_opposite_per_comp[[comp]],
         Overlap_First_Level           = overlap_first_level,
         Overlap_Second_Level          = overlap_second_level,
         FC_Threshold                  = fc_thresh,
@@ -571,11 +546,6 @@ for (fc_thresh in fc_thresholds) {
     
     ggsave(file.path(thresh_dir, "validated_deps_summary.png"),
            plot = p, width = 14, height = 8, dpi = 300)
-    
-    all_threshold_results[[paste0("FC", fc_thresh, "_Stab", stab_thresh)]] <- list(
-      validated_deps = validated_deps_df,
-      summary_stats  = summary_stats
-    )
     
     cat("\n=== Completed FC", fc_thresh, "Stab", stab_thresh, "===\n")
   }
