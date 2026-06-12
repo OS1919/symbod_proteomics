@@ -9,7 +9,7 @@ drugstone.print_license()
 drugstone.accept_license()
 
 # Load the data
-df = pd.read_csv('valid_DEPs/FC5.6_Stab1.2/validated_DEPs.csv')
+df = pd.read_csv('valid_DEPs/FC5.59_Stab1.2/validated_DEPs.csv')
 
 print(f"Total proteins in file: {len(df)}")
 print(f"\nValidation categories:")

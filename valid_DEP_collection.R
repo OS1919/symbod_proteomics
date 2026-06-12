@@ -241,7 +241,8 @@ for (i in 1:min(10, nrow(extreme_fc))) {
 # ============================================================================
 ###################################################################
 
-fc_thresholds        <- c(4.04, 5.6, 9.36)
+# FC thresholds derived from the background distribution computed above — no hardcoding.
+fc_thresholds        <- round(c(p70, p80, p90), 2)
 # Stability threshold = max allowed ratio between the two groups' geo-mean FCs.
 # e.g. 1.25 means "the larger group's AI/AS separation is at most 1.25-fold the smaller's".
 stability_thresholds <- c(1.1, 1.2, 1.3)

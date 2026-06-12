@@ -3,7 +3,7 @@ from scipy.stats import hypergeom
 import os
 
 # Configuration
-base_path = 'valid_DEPs/FC5.6_Stab1.2'
+base_path = 'valid_DEPs/FC5.59_Stab1.2'
 comparison = "diabetic_PCL_42-nondiabetic_PCL_42"
 #comparison = "diabetic_empty_42-nondiabetic_empty_42"
 

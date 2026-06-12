@@ -5,7 +5,7 @@ import os
 # CONFIGURATION
 # ============================================================================
 os.chdir('/home/ole/symbod_proteomics')
-FC_THRESH = 5.6
+FC_THRESH = 5.59
 STAB_THRESH = 1.2
 BASE_DIR = 'valid_DEPs'
 
