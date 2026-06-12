@@ -81,11 +81,11 @@ else:
     print(f"  P-value: {set2_pval:.2e}")
 
     # SET 3: First-level + Second-level DEPs
-    set3_count = set1_count + int(row['Validated_Dominant'])
+    set3_count = set1_count + int(row['Validated_Second_Level'])
     set3_overlap = set1_overlap + int(row['Overlap_Second_Level'])
     set3_pval = hypergeom.sf(set3_overlap - 1, total_proteome_size, bone_caps_tested, set3_count)
 
     print(f"\nSet 3 (First-level + Second-level):")
-    print(f"  Total: {set3_count} (+{int(row['Validated_Dominant'])} from second-level)")
+    print(f"  Total: {set3_count} (+{int(row['Validated_Second_Level'])} from second-level)")
     print(f"  Overlap: {set3_overlap} ({set3_overlap / set3_count * 100:.2f}%)")
     print(f"  P-value: {set3_pval:.2e}")

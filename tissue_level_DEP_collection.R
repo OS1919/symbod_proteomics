@@ -474,7 +474,7 @@ for (fc_thresh in fc_thresholds) {
         Overlap_Total                 = overlap_total,
         Validated_Both_Fractions      = n_both,
         Validated_Exclusive           = n_exclusive,
-        Validated_Dominant            = n_dominant_stable,
+        Validated_Second_Level            = n_dominant_stable,
         Validated_Total               = validated_count,
         Dominant_Removed_By_Stability = dominant_removed[[comp]],
         DEPs_Tested_Second_Level      = tested_second_level_per_comp[[comp]],
@@ -496,7 +496,7 @@ for (fc_thresh in fc_thresholds) {
     plot_data <- summary_stats %>%
       mutate(
         First_Level_Total  = Validated_Both_Fractions + Validated_Exclusive,
-        Second_Level_Total = Validated_Dominant
+        Second_Level_Total = Validated_Second_Level
       ) %>%
       select(Comparison_Label, Total_Unique_DEPs, Overlap_Total,
              First_Level_Total, Overlap_First_Level,
