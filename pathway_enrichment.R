@@ -16,12 +16,13 @@ citation("org.Rn.eg.db")
 base_output_dir <- "valid_DEPs/"
 
 # Define the threshold combinations to process
-fc_thresholds <- c(4.04, 5.6, 9.36)
+fc_thresholds <- c(4.04, 5.59, 9.32)
 stability_thresholds <- c(1.1, 1.2, 1.3)
 
 # Paths to full DE results for background universe
 ai_base_path <- "de_analysis_results_AI_RobNorm_scaled/"
 as_base_path <- "de_analysis_results_AS_RobNorm_scaled/"
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -179,38 +180,40 @@ for (fc_thresh in fc_thresholds) {
       first_level_deps <- comp_deps[grepl("both fractions|Exclusive", comp_deps$Validation), ]
       second_level_deps <- comp_deps[grepl("Dominant and stable", comp_deps$Validation), ]
       
-      # Load comparison-specific exception proteins
-      exception_file <- file.path("network_enrichment_results", comparison, "exception_proteins.csv")
+      # Load MUST connector proteins for tissue-level DEPs (both_levels network run)
+      exception_file <- file.path("network_enrichment_results", comparison, "both_levels", "exception_proteins.csv")
       exception_genes <- NULL
+      exception_rat <- NULL
+      exception_entrez <- NULL
       exception_entrez_count <- 0
       if (file.exists(exception_file)) {
         exceptions <- read.csv(exception_file)
         exception_genes <- exceptions$Gene
-        
+
         # Convert human to rat and get Entrez IDs
         exception_rat <- convert_human_to_rat_symbols(exception_genes)
         exception_entrez <- convert_to_entrez(exception_rat)
         exception_entrez_count <- length(exception_entrez)
       }
 
-      # CREATE 3 SETS:
-      # Set 1: First-level genes only
-      set1_genes <- first_level_deps$Gene.Names
-      
-      # Set 2: First-level + exception proteins (converted to rat)
+      # CREATE 3 SETS matching the bone meta-analysis overlap analysis:
+      # Set 1: All tissue-level DEPs (first-level + second-level)
+      set1_genes <- unique(comp_deps$Gene.Names)
+
+      # Set 2: Tissue-level DEPs + MUST connector proteins
       set2_genes <- set1_genes
       if (!is.null(exception_genes)) {
         set2_genes <- unique(c(set1_genes, exception_rat))
       }
-      
-      # Set 3: First-level + second-level
-      set3_genes <- unique(c(first_level_deps$Gene.Names, second_level_deps$Gene.Names))
-      
+
+      # Set 3: First-level DEPs only
+      set3_genes <- unique(first_level_deps$Gene.Names)
+
       # Define the 3 sets
       sets_to_analyze <- list(
-        list(name = "set1_first_level", genes = set1_genes),
-        list(name = "set2_first_plus_network", genes = set2_genes),
-        list(name = "set3_first_plus_second", genes = set3_genes)
+        list(name = "set1_tissue_level", genes = set1_genes),
+        list(name = "set2_tissue_plus_network", genes = set2_genes),
+        list(name = "set3_first_level", genes = set3_genes)
       )
       
       # Read FULL DE results to get background universe
@@ -261,9 +264,9 @@ for (fc_thresh in fc_thresholds) {
         output_dir <- file.path(thresh_dir, "enrichment", set_name)
         dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
         
-        # For Set 2 expand background with exception proteins
+        # For Set 2 expand background with MUST connector proteins
         current_background <- background_entrez
-        if (set_name == "set2_first_plus_network" && !is.null(exception_genes)) {
+        if (set_name == "set2_tissue_plus_network" && !is.null(exception_genes)) {
           current_background <- unique(c(background_entrez, exception_entrez))
         }
         
@@ -305,7 +308,7 @@ for (fc_thresh in fc_thresholds) {
           # Save results for THIS set only
           if (length(all_enrichment_results) > 0) {
             combined_enrichment <- dplyr::bind_rows(all_enrichment_results)
-            write.csv(combined_enrichment, 
+            write.csv(combined_enrichment,
                       file.path(output_dir, paste0(comparison, "_", set_name, "_enrichment_complete.csv")))
           }
           
@@ -317,19 +320,15 @@ for (fc_thresh in fc_thresholds) {
             0
           }
           
+          is_set2 <- set_name == "set2_tissue_plus_network"
           summary_row <- data.frame(
             Comparison = comparison,
             Set = set_name,
-            Total_Genes_Input = length(genes),  # Gene symbols input
-            Total_Genes_Tested = genes_tested,  # Entrez IDs actually tested
-            Exception_Proteins = ifelse(set_name == "set2_first_plus_network", 
-                                        length(exception_genes %||% character(0)), 0),
-            Exception_Proteins_Rat = ifelse(set_name == "set2_first_plus_network",
-                                            length(exception_rat %||% character(0)), 0),
-            Exception_Proteins_Entrez = ifelse(set_name == "set2_first_plus_network",
-                                               exception_entrez_count, 0),
-            Exception_Proteins_Tested = ifelse(set_name == "set2_first_plus_network",
-                                               exception_entrez_count, 0),
+            Total_Genes_Input = length(genes),
+            Total_Genes_Tested = genes_tested,
+            Connector_Proteins_Human = ifelse(is_set2, length(exception_genes %||% character(0)), 0),
+            Connector_Proteins_Rat = ifelse(is_set2, length(exception_rat %||% character(0)), 0),
+            Connector_Proteins_Entrez = ifelse(is_set2, exception_entrez_count, 0),
             Background_Universe = length(current_background),
             Enrichment_Performed = !is.null(enrichment_results),
             Significant_Pathways = n_significant,
