@@ -1,9 +1,18 @@
 import os
+import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.stats import hypergeom
+
+
+def normalize_pathway_id(pid):
+    """Convert organism-specific KEGG IDs (e.g. rno00010) to KEGG: format (KEGG:00010).
+    GO IDs are already in the correct format and pass through unchanged."""
+    if re.match(r'^[a-z]{3}\d+$', str(pid)):
+        return "KEGG:" + pid[3:]
+    return pid
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -74,8 +83,8 @@ for fc in FC_THRESHOLDS:
                 df     = pd.read_csv(fpath)
                 sig_df = df[df["p.adjust"] < 0.05]
 
-                complete_pathways = set(df["ID"].dropna())
-                sig_pathways      = set(sig_df["ID"].dropna())
+                complete_pathways = set(df["ID"].dropna().map(normalize_pathway_id))
+                sig_pathways      = set(sig_df["ID"].dropna().map(normalize_pathway_id))
                 overlap_complete  = bone_pathways & complete_pathways
                 overlap_sig       = bone_pathways & sig_pathways
 
