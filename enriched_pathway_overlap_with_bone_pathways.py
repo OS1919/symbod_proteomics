@@ -47,6 +47,9 @@ bone_pathways = set(pd.read_csv(BONE_FILE)["term_id"].dropna())
 
 print(f"Bone meta-analysis: {len(bone_pathways)} pathways\n")
 
+# Collect results for supplement export
+_results = []
+
 # ── Loop over all threshold combinations ──────────────────────────────────────
 
 for fc in FC_THRESHOLDS:
@@ -95,6 +98,19 @@ for fc in FC_THRESHOLDS:
 
                 expected = (N * n) / M if M > 0 else 0
                 p        = hypergeom.sf(k - 1, M, n, N)
+
+                _results.append({
+                    "FC threshold":          fc,
+                    "Stability threshold":   stab,
+                    "Comparison":            comp_label,
+                    "Protein set":           set_dir,
+                    "Terms tested (M)":      M,
+                    "Bone terms tested (n)": n,
+                    "Significant terms (N)": N,
+                    "Bone terms significant (k)": k,
+                    "Expected overlap":      round(expected, 2),
+                    "p-value":               p,
+                })
 
                 n_sig_list.append(N)
                 p_list.append(p)
@@ -198,3 +214,33 @@ for fc in FC_THRESHOLDS:
         print(f"\nSaved {out_path}")
 
 print(f"\n{'='*60}\nDONE\n{'='*60}")
+
+# ── Supplement export ─────────────────────────────────────────────────────────
+
+SET_LABELS_MAP = {
+    "set1_tissue_level":        "Tissue level DEPs",
+    "set2_tissue_plus_network": "Tissue level DEPs + network",
+    "set3_first_level":         "First level DEPs",
+}
+
+results_df = pd.DataFrame(_results)
+results_df["Protein set"] = results_df["Protein set"].map(SET_LABELS_MAP)
+
+OUT_FILE = "pathway_bone_overlap_supplement.xlsx"
+with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
+    for comp_label in COMPARISONS.values():
+        subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
+        pivot  = subset.pivot(
+            index=["FC threshold", "Stability threshold"],
+            columns="Protein set",
+            values=["Significant terms (N)", "Bone terms significant (k)", "Expected overlap", "p-value"],
+        )
+        # Flatten multi-level columns: "Significant terms (N) | Tissue level DEPs" etc.
+        pivot.columns = [f"{metric} | {pset}" for metric, pset in pivot.columns]
+        pivot = pivot.reset_index()
+
+        sheet_name = comp_label  # "Empty defect" (12 chars) and "PCL scaffold" (12 chars)
+        pivot.to_excel(writer, sheet_name=sheet_name, index=False)
+
+print(f"Saved → {OUT_FILE}")
+print(f"  Sheets: {list(COMPARISONS.values())}")

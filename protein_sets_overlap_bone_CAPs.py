@@ -35,6 +35,9 @@ ai_de     = pd.read_csv("de_analysis_results_AI_RobNorm_scaled/de_results_raw.cs
 as_de     = pd.read_csv("de_analysis_results_AS_RobNorm_scaled/de_results_raw.csv")
 bone_caps = set(pd.read_csv("input/bone_caps_meta_analysis.csv")["Gene"].dropna().str.upper())
 
+# Collect results for supplement export
+_results = []
+
 # ── Loop over all threshold combinations ──────────────────────────────────────
 
 for fc in FC_THRESHOLDS:
@@ -87,6 +90,28 @@ for fc in FC_THRESHOLDS:
 
             PROTEIN_N[comp_label]     = [s1, s2, s3]
             protein_pvals[comp_label] = [p1, p2, p3]
+
+            expected1 = round((s1 * n) / M, 2) if M > 0 else 0
+            expected2 = round((s2 * n) / M, 2) if M > 0 else 0
+            expected3 = round((s3 * n) / M, 2) if M > 0 else 0
+
+            for set_label, s, o, expected, p in [
+                ("Tissue-level DEPs",                    s1, o1, expected1, p1),
+                ("Tissue-level DEPs + connector proteins", s2, o2, expected2, p2),
+                ("First-level DEPs",                     s3, o3, expected3, p3),
+            ]:
+                _results.append({
+                    "FC threshold":             fc,
+                    "Stability threshold":      stab,
+                    "Comparison":               comp_label,
+                    "Protein set":              set_label,
+                    "Proteome size (M)":        M,
+                    "Bone CAPs in proteome (n)": n,
+                    "Protein set size (N)":     s,
+                    "Bone CAPs overlap (k)":    o,
+                    "Expected overlap":         expected,
+                    "p-value":                  p,
+                })
 
             print(f"\n{comp_label}:")
             print(f"  Tissue-level DEPs                  n={s1:>4}  overlap={o1:>3}  p={p1:.3e}")
@@ -183,3 +208,34 @@ for fc in FC_THRESHOLDS:
         plt.savefig(out_path, dpi=180, bbox_inches="tight")
         plt.close()
         print(f"Saved {out_path}")
+
+# ── Supplement export ─────────────────────────────────────────────────────────
+
+PROTEIN_SET_ORDER = [
+    "Tissue-level DEPs",
+    "Tissue-level DEPs + connector proteins",
+    "First-level DEPs",
+]
+
+results_df = pd.DataFrame(_results)
+
+OUT_FILE = "protein_bone_overlap_supplement.xlsx"
+with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
+    for comp_label in COMPARISONS.values():
+        subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
+        pivot  = subset.pivot(
+            index=["FC threshold", "Stability threshold"],
+            columns="Protein set",
+            values=["Protein set size (N)", "Bone CAPs overlap (k)", "Expected overlap", "p-value"],
+        )
+        pivot = pivot.reindex(columns=pd.MultiIndex.from_product([
+            ["Protein set size (N)", "Bone CAPs overlap (k)", "Expected overlap", "p-value"],
+            PROTEIN_SET_ORDER,
+        ]))
+        pivot.columns = [f"{metric} | {pset}" for metric, pset in pivot.columns]
+        pivot = pivot.reset_index()
+
+        pivot.to_excel(writer, sheet_name=comp_label, index=False)
+
+print(f"Saved → {OUT_FILE}")
+print(f"  Sheets: {list(COMPARISONS.values())}")
