@@ -11,15 +11,26 @@ drugstone.accept_license()
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-FC_THRESH = 5.59
-STAB_THRESH = 1.2
+FC_THRESHOLDS   = [4.04, 5.59, 9.32]
+STAB_THRESHOLDS = [1.1, 1.2, 1.3]
 BASE_DIR = 'valid_DEPs'
 
-# Comparisons to analyze
-COMPARISONS = [
-    'diabetic_empty_42-nondiabetic_empty_42',
-    'diabetic_PCL_42-nondiabetic_PCL_42'
+COMPARISONS = {
+    'diabetic_empty_42-nondiabetic_empty_42': 'Empty defect',
+    'diabetic_PCL_42-nondiabetic_PCL_42':     'PCL scaffold',
+}
+
+PROTEIN_SETS = [
+    'set1_tissue_level',
+    'set2_tissue_plus_network',
+    'set3_first_level',
 ]
+
+SET_SCORE_LABELS = {
+    'set1_tissue_level':        'Score (tissue-level DEPs)',
+    'set2_tissue_plus_network': 'Score (tissue-level DEPs + connectors)',
+    'set3_first_level':         'Score (first-level DEPs)',
+}
 
 # Drug search parameters
 PARAMETERS = {
@@ -44,18 +55,15 @@ def get_genes(comparison, protein_set, base_dir, fc_thresh, stab_thresh):
     df = pd.read_csv(validated_file)
     df = df[df['Comparison'] == comparison]
 
-    if protein_set == 'set1_first_level':
-        # First-level only
-        df = df[df['Validation'].str.contains('Exclusive to |(same direction)', regex=True)]
+    if protein_set == 'set1_tissue_level':
+        # All tissue-level DEPs (first-level + second-level)
         genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
 
-    elif protein_set == 'set2_first_plus_network':
-        # First-level + exception proteins
-        df = df[df['Validation'].str.contains('Exclusive to |(same direction)', regex=True)]
+    elif protein_set == 'set2_tissue_plus_network':
+        # All tissue-level DEPs + connector proteins (from both_levels network run)
         genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
 
-        # Add exception proteins
-        exception_file = f'network_enrichment_results/{comparison}/exception_proteins.csv'
+        exception_file = f'network_enrichment_results/{comparison}/both_levels/exception_proteins.csv'
         if os.path.exists(exception_file):
             exception_df = pd.read_csv(exception_file)
             exception_genes = exception_df['Gene'].dropna().tolist()
@@ -63,8 +71,9 @@ def get_genes(comparison, protein_set, base_dir, fc_thresh, stab_thresh):
         else:
             print(f"WARNING: Exception file not found: {exception_file}")
 
-    elif protein_set == 'set3_first_plus_second':
-        # First-level + second-level (no filtering)
+    elif protein_set == 'set3_first_level':
+        # First-level DEPs only
+        df = df[df['Validation'].str.contains('Exclusive to |(same direction)', regex=True)]
         genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
 
     else:
@@ -140,45 +149,88 @@ def run_drug_search(genes, comparison, set_name, output_dir):
 # MAIN ANALYSIS
 # ============================================================================
 
-output_dir = os.path.join(BASE_DIR, f'FC{FC_THRESH}_Stab{STAB_THRESH}', 'drug_repurposing')
-os.makedirs(output_dir, exist_ok=True)
+# Collects intersection drugs across all thresholds for the supplement export
+_supplement_rows = []
 
-all_results = []
+for fc in FC_THRESHOLDS:
+    for stab in STAB_THRESHOLDS:
+        output_dir = os.path.join(BASE_DIR, f'FC{fc}_Stab{stab}', 'drug_repurposing')
+        os.makedirs(output_dir, exist_ok=True)
 
-for comparison in COMPARISONS:
-    for set_name in ['set1_first_level', 'set2_first_plus_network', 'set3_first_plus_second']:
-        try:
-            # Get genes
-            genes = get_genes(comparison, set_name, BASE_DIR, FC_THRESH, STAB_THRESH)
+        for comparison in COMPARISONS:
+            set_dfs = {}  # set_name → drug_df
 
-            if len(genes) == 0:
-                print(f"WARNING: No genes found for {comparison} - {set_name}")
-                continue
+            for set_name in PROTEIN_SETS:
+                try:
+                    genes = get_genes(comparison, set_name, BASE_DIR, fc, stab)
+                    if not genes:
+                        print(f"WARNING: No genes found for {comparison} - {set_name}")
+                        continue
+                    drug_df = run_drug_search(genes, comparison, set_name, output_dir)
+                    set_dfs[set_name] = drug_df
+                except Exception as e:
+                    print(f"ERROR in {comparison} - {set_name}: {e}")
+                    continue
 
-            # Run search
-            drug_df = run_drug_search(genes, comparison, set_name, output_dir)
-            all_results.append(drug_df)
+            # ── Intersection: drugs present in all 3 protein sets ─────────────
+            if len(set_dfs) == 3:
+                common_drugs = set(set_dfs[PROTEIN_SETS[0]]['Drug'])
+                for s in PROTEIN_SETS[1:]:
+                    common_drugs &= set(set_dfs[s]['Drug'])
 
-        except Exception as e:
-            print(f"ERROR in {comparison} - {set_name}: {e}")
-            continue
+                rows = []
+                for drug in common_drugs:
+                    scores = {s: float(set_dfs[s].loc[set_dfs[s]['Drug'] == drug, 'Score'].iloc[0])
+                              for s in PROTEIN_SETS}
+                    ref_row = set_dfs[PROTEIN_SETS[0]][set_dfs[PROTEIN_SETS[0]]['Drug'] == drug].iloc[0]
+                    rows.append({
+                        'FC threshold':       fc,
+                        'Stability threshold': stab,
+                        'Comparison':         comparison,
+                        'Drug':               drug,
+                        'DrugBank_ID':        ref_row['DrugBank_ID'],
+                        'Status':             ref_row['Status'],
+                        SET_SCORE_LABELS['set1_tissue_level']:        scores['set1_tissue_level'],
+                        SET_SCORE_LABELS['set2_tissue_plus_network']:  scores['set2_tissue_plus_network'],
+                        SET_SCORE_LABELS['set3_first_level']:         scores['set3_first_level'],
+                        'Mean score':         sum(scores.values()) / 3,
+                    })
 
-# Combine all results
-if all_results:
-    combined_df = pd.concat(all_results, ignore_index=True)
-    combined_file = os.path.join(output_dir, 'all_drugs_combined.csv')
-    combined_df.to_csv(combined_file, index=False)
-    print(f"\n{'=' * 70}")
-    print(f"All results saved to: {combined_file}")
-    print(f"{'=' * 70}")
+                intersection_df = (
+                    pd.DataFrame(rows)
+                    .sort_values('Mean score', ascending=False)
+                    .reset_index(drop=True)
+                )
 
-    # Summary across all analyses
-    print(f"\n=== OVERALL SUMMARY ===")
-    print(f"Total analyses: {len(all_results)}")
-    print(f"Total unique drugs: {combined_df['Drug'].nunique()}")
-    print(f"\nDrugs by comparison:")
-    print(combined_df.groupby('Comparison')['Drug'].nunique())
-    print(f"\nDrugs by set:")
-    print(combined_df.groupby('Set')['Drug'].nunique())
+                top_file = os.path.join(output_dir, f'{comparison}_top_drugs_intersection.csv')
+                intersection_df.to_csv(top_file, index=False)
+                print(f"\nIntersection ({comparison}): {len(intersection_df)} drugs in all 3 sets → {top_file}")
+
+                _supplement_rows.append(intersection_df)
+            else:
+                print(f"WARNING: Only {len(set_dfs)}/3 sets completed for {comparison} FC{fc}_Stab{stab} — skipping intersection")
+
+
+# ============================================================================
+# SUPPLEMENT EXPORT
+# ============================================================================
+
+if _supplement_rows:
+    all_top = pd.concat(_supplement_rows, ignore_index=True)
+
+    OUT_FILE = 'top_drugs_supplement.xlsx'
+    with pd.ExcelWriter(OUT_FILE, engine='openpyxl') as writer:
+        for comp_key, comp_label in COMPARISONS.items():
+            subset = (
+                all_top[all_top['Comparison'] == comp_key]
+                .drop(columns='Comparison')
+                .sort_values(['FC threshold', 'Stability threshold', 'Mean score'],
+                             ascending=[True, True, False])
+                .reset_index(drop=True)
+            )
+            subset.to_excel(writer, sheet_name=comp_label, index=False)
+            print(f"  Sheet '{comp_label}': {len(subset)} rows")
+
+    print(f"\nSaved → {OUT_FILE}")
 
 print("\n✓ Drug repurposing analysis complete!")
