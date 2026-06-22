@@ -226,7 +226,9 @@ SET_LABELS_MAP = {
 results_df = pd.DataFrame(_results)
 results_df["Protein set"] = results_df["Protein set"].map(SET_LABELS_MAP)
 
-OUT_FILE = "pathway_bone_overlap_supplement.xlsx"
+SUPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supplements")
+os.makedirs(SUPP_DIR, exist_ok=True)
+OUT_FILE = os.path.join(SUPP_DIR, "pathway_bone_overlap_supplement.xlsx")
 with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
     for comp_label in COMPARISONS.values():
         subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")

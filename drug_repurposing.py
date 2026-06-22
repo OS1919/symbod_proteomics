@@ -218,7 +218,9 @@ for fc in FC_THRESHOLDS:
 if _supplement_rows:
     all_top = pd.concat(_supplement_rows, ignore_index=True)
 
-    OUT_FILE = 'top_drugs_supplement.xlsx'
+    SUPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'supplements')
+    os.makedirs(SUPP_DIR, exist_ok=True)
+    OUT_FILE = os.path.join(SUPP_DIR, 'top_drugs_supplement.xlsx')
     with pd.ExcelWriter(OUT_FILE, engine='openpyxl') as writer:
         for comp_key, comp_label in COMPARISONS.items():
             subset = (

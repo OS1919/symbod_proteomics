@@ -219,7 +219,9 @@ PROTEIN_SET_ORDER = [
 
 results_df = pd.DataFrame(_results)
 
-OUT_FILE = "protein_bone_overlap_supplement.xlsx"
+SUPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supplements")
+os.makedirs(SUPP_DIR, exist_ok=True)
+OUT_FILE = os.path.join(SUPP_DIR, "protein_bone_overlap_supplement.xlsx")
 with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
     for comp_label in COMPARISONS.values():
         subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
