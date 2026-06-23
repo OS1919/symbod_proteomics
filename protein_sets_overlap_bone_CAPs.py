@@ -222,7 +222,31 @@ results_df = pd.DataFrame(_results)
 SUPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supplements")
 os.makedirs(SUPP_DIR, exist_ok=True)
 OUT_FILE = os.path.join(SUPP_DIR, "protein_bone_overlap_supplement.xlsx")
+README = pd.DataFrame([
+    ("Sheet name",   "Content"),
+    ("Empty defect", "Diabetic vs. non-diabetic, empty bone defect."),
+    ("PCL scaffold", "Diabetic vs. non-diabetic, PCL scaffold."),
+    ("",             ""),
+    ("Column name",  "Description"),
+    ("FC threshold",              "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+    ("Stability threshold",       "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+    ("Protein set size (N) | Tissue-level DEPs",                    "Number of tissue-level DEPs."),
+    ("Protein set size (N) | Tissue-level DEPs + connector proteins","Number of tissue-level DEPs + network connector proteins."),
+    ("Protein set size (N) | First-level DEPs",                     "Number of first-level DEPs."),
+    ("Bone CAPs overlap (k) | Tissue-level DEPs",                    "Tissue-level DEPs also in the bone CAPs reference."),
+    ("Bone CAPs overlap (k) | Tissue-level DEPs + connector proteins","Tissue-level DEPs + connectors also in the bone CAPs reference."),
+    ("Bone CAPs overlap (k) | First-level DEPs",                     "First-level DEPs also in the bone CAPs reference."),
+    ("Expected overlap | Tissue-level DEPs",                    "Expected overlap under hypergeometric null, tissue-level DEPs."),
+    ("Expected overlap | Tissue-level DEPs + connector proteins","Expected overlap under hypergeometric null, tissue-level DEPs + connectors."),
+    ("Expected overlap | First-level DEPs",                     "Expected overlap under hypergeometric null, first-level DEPs."),
+    ("p-value | Tissue-level DEPs",                    "Hypergeometric p-value, tissue-level DEPs."),
+    ("p-value | Tissue-level DEPs + connector proteins","Hypergeometric p-value, tissue-level DEPs + connectors."),
+    ("p-value | First-level DEPs",                     "Hypergeometric p-value, first-level DEPs."),
+], columns=["_", "__"])
+
 with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
+    README.to_excel(writer, sheet_name="README", index=False, header=False, startrow=2)
+    writer.sheets["README"]["A1"] = "Protein Set Overlap with Bone-Healing Reference Proteins (CAPs)"
     for comp_label in COMPARISONS.values():
         subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
         pivot  = subset.pivot(

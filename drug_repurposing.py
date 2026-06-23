@@ -221,7 +221,28 @@ if _supplement_rows:
     SUPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'supplements')
     os.makedirs(SUPP_DIR, exist_ok=True)
     OUT_FILE = os.path.join(SUPP_DIR, 'top_drugs_supplement.xlsx')
+    README = pd.DataFrame([
+        ("Sheet name",  "Content"),
+        ("Empty defect", "Diabetic vs. non-diabetic, empty bone defect."),
+        ("PCL scaffold", "Diabetic vs. non-diabetic, PCL scaffold."),
+        ("",            ""),
+        ("Column name", "Description"),
+        ("FC threshold",                       "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+        ("Stability threshold",                "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+        ("Drug",                               "Drug name."),
+        ("DrugBank_ID",                        "DrugBank identifier."),
+        ("Status",                             "Approval status (e.g. approved, investigational)."),
+        ("Score (tissue-level DEPs)",          "TrustRank score using tissue-level DEPs as seeds."),
+        ("Score (tissue-level DEPs + connectors)", "TrustRank score using tissue-level DEPs + network connectors as seeds."),
+        ("Score (first-level DEPs)",           "TrustRank score using first-level DEPs only as seeds."),
+        ("Mean score",                         "Mean TrustRank score across all three protein sets. Used for ranking."),
+        ("",                                   ""),
+        ("Note",                               "Only drugs appearing in the top 100 of all three protein sets are included."),
+    ], columns=["_", "__"])
+
     with pd.ExcelWriter(OUT_FILE, engine='openpyxl') as writer:
+        README.to_excel(writer, sheet_name='README', index=False, header=False, startrow=2)
+        writer.sheets['README']['A1'] = "Drug Repurposing Candidates"
         for comp_key, comp_label in COMPARISONS.items():
             subset = (
                 all_top[all_top['Comparison'] == comp_key]
