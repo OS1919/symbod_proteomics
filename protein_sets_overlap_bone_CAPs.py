@@ -17,17 +17,18 @@ COMPARISONS = {
 }
 
 labels = [
+    "First-level\nDEPs",
     "Tissue-level\nDEPs",
     "Tissue-level DEPs +\nconnector proteins",
-    "First-level\nDEPs",
 ]
 
 COLORS = {
     "Empty defect": "#4A90C4",
     "PCL scaffold":  "#E07B54",
+    "Shared":        "#73B87C",
 }
 LINE_COLOR = "#1A1A1A"
-BAR_WIDTH  = 0.32
+BAR_WIDTH  = 0.22
 GROUP_GAP  = 0.08
 
 # Load data that is shared across all threshold combinations
@@ -60,6 +61,8 @@ for fc in FC_THRESHOLDS:
 
         PROTEIN_N     = {}
         protein_pvals = {}
+        valid_deps    = pd.read_csv(os.path.join(THRESH_DIR, "validated_DEPs.csv"))
+        _gene_sets    = {}
 
         for comp_key, comp_label in COMPARISONS.items():
             row = summary.loc[comp_key]
@@ -88,8 +91,21 @@ for fc in FC_THRESHOLDS:
             o3 = int(row["Overlap_First_Level"])
             p3 = hypergeom.sf(o3 - 1, M, n, s3)
 
-            PROTEIN_N[comp_label]     = [s1, s2, s3]
-            protein_pvals[comp_label] = [p1, p2, p3]
+            # Verify file-derived counts match summary statistics, then store gene sets
+            cd         = valid_deps[valid_deps["Comparison"] == comp_key]
+            first_mask = ~cd["Validation"].str.startswith("Dominant")
+            assert first_mask.sum() == s3, (
+                f"{comp_key}: first-level DEP count mismatch — file={first_mask.sum()}, summary={s3}"
+            )
+            assert len(cd) == s1, (
+                f"{comp_key}: tissue-level DEP count mismatch — file={len(cd)}, summary={s1}"
+            )
+            first_lvl  = set(cd.loc[first_mask, "Gene.Names"].str.upper())
+            tissue_lvl = set(cd["Gene.Names"].str.upper())
+            _gene_sets[comp_key] = [first_lvl, tissue_lvl, tissue_lvl | exc_prots]
+
+            PROTEIN_N[comp_label]     = [s3, s1, s2]
+            protein_pvals[comp_label] = [p3, p1, p2]
 
             expected1 = round((s1 * n) / M, 2) if M > 0 else 0
             expected2 = round((s2 * n) / M, 2) if M > 0 else 0
@@ -118,19 +134,29 @@ for fc in FC_THRESHOLDS:
             print(f"  Tissue-level DEPs + connectors     n={s2:>4}  overlap={o2:>3}  p={p2:.3e}")
             print(f"  First-level DEPs only              n={s3:>4}  overlap={o3:>3}  p={p3:.3e}")
 
+        # ── Shared proteins (intersection between comparisons) ────────────────
+
+        comp_keys = list(COMPARISONS.keys())
+        PROTEIN_N["Shared"] = [
+            len(_gene_sets[comp_keys[0]][i] & _gene_sets[comp_keys[1]][i])
+            for i in range(3)
+        ]
+
         # ── Figure ────────────────────────────────────────────────────────────
 
         x          = np.arange(len(labels))
-        comparisons = list(PROTEIN_N.keys())
-        n_comp     = len(comparisons)
+        bar_comps  = list(PROTEIN_N.keys())       # Empty defect, PCL scaffold, Shared
+        pval_comps = list(protein_pvals.keys())   # Empty defect, PCL scaffold
+        n_bar      = len(bar_comps)
+        n_pval     = len(pval_comps)
 
         fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(10.5, 4.5))
-        fig.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.28, wspace=0.32)
+        fig.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.30, wspace=0.32)
 
         # ── Panel (a): protein set sizes ──────────────────────────────────────
 
-        for ci, comp in enumerate(comparisons):
-            offset    = (ci - (n_comp - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
+        for ci, comp in enumerate(bar_comps):
+            offset    = (ci - (n_bar - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
             positions = x + offset
             ax_a.bar(positions, PROTEIN_N[comp], width=BAR_WIDTH,
                      color=COLORS[comp], alpha=0.90,
@@ -149,12 +175,14 @@ for fc in FC_THRESHOLDS:
         ax_a.spines[["top", "right"]].set_visible(False)
         ax_a.set_xticks(x)
         ax_a.set_xticklabels(labels, fontsize=9)
+        ax_a.set_xlabel("Protein set", fontsize=10, labelpad=14)
         ax_a.text(-0.01, 1.02, "(a)", transform=ax_a.transAxes,
                   fontsize=11, fontweight="bold", va="bottom", ha="left")
 
         legend_handles = [
             mpatches.Patch(color=COLORS["Empty defect"], label="Empty defect"),
             mpatches.Patch(color=COLORS["PCL scaffold"],  label="PCL scaffold"),
+            mpatches.Patch(color=COLORS["Shared"],        label="Shared (both comparisons)"),
         ]
 
         # ── Panel (b): overlap significance — lollipop chart ─────────────────
@@ -162,9 +190,9 @@ for fc in FC_THRESHOLDS:
         all_neg_log = [-np.log10(p) for pvals in protein_pvals.values() for p in pvals]
         ymax_b      = max(all_neg_log) * 1.22
 
-        for ci, comp in enumerate(comparisons):
+        for ci, comp in enumerate(pval_comps):
             neg_log   = [-np.log10(p) for p in protein_pvals[comp]]
-            offset    = (ci - (n_comp - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
+            offset    = (ci - (n_pval - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
             positions = x + offset
             for pos, val in zip(positions, neg_log):
                 val_clipped = min(val, ymax_b)
@@ -191,13 +219,14 @@ for fc in FC_THRESHOLDS:
         ax_b.spines[["top", "right"]].set_visible(False)
         ax_b.set_xticks(x)
         ax_b.set_xticklabels(labels, fontsize=9)
+        ax_b.set_xlabel("Protein set", fontsize=10, labelpad=14)
         ax_b.text(-0.01, 1.02, "(b)", transform=ax_b.transAxes,
                   fontsize=11, fontweight="bold", va="bottom", ha="left")
 
         # ── Shared legend centered below both panels ──────────────────────────
 
         fig.legend(handles=legend_handles, fontsize=9, frameon=False,
-                   loc="lower center", bbox_to_anchor=(0.53, 0.01), ncol=2,
+                   loc="lower center", bbox_to_anchor=(0.53, 0.01), ncol=3,
                    handlelength=1.2, handletextpad=0.5, columnspacing=1.2,
                    title="Comparison",
                    title_fontproperties={"weight": "bold", "size": 10})

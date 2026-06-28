@@ -26,20 +26,21 @@ COMPARISONS = {
     "diabetic_PCL_42-nondiabetic_PCL_42":     "PCL scaffold",
 }
 
-SET_DIRS = ["set1_tissue_level", "set2_tissue_plus_network", "set3_first_level"]
+SET_DIRS = ["set3_first_level", "set1_tissue_level", "set2_tissue_plus_network"]
 
 labels = [
-    "Pathways enriched\nfrom\ntissue-level DEPs",
-    "Pathways enriched\nfrom\ntissue-level DEPs\n+ connector proteins",
-    "Pathways enriched\nfrom\nfirst-level DEPs",
+    "First-level\nDEPs",
+    "Tissue-level DEPs",
+    "Tissue-level DEPs\n+ connector proteins",
 ]
 
 COLORS = {
     "Empty defect": "#4A90C4",
     "PCL scaffold":  "#E07B54",
+    "Shared":        "#73B87C",
 }
 LINE_COLOR = "#1A1A1A"
-BAR_WIDTH  = 0.32
+BAR_WIDTH  = 0.22
 GROUP_GAP  = 0.08
 
 # Load bone reference pathways once (shared across all threshold combinations)
@@ -68,6 +69,7 @@ for fc in FC_THRESHOLDS:
 
         PATHWAY_N     = {}
         pathway_pvals = {}
+        sig_ids_store = {ck: {} for ck in COMPARISONS}
 
         for comp_key, comp_label in COMPARISONS.items():
             n_sig_list = []
@@ -81,6 +83,7 @@ for fc in FC_THRESHOLDS:
                     print(f"  Missing: {fpath}")
                     n_sig_list.append(0)
                     p_list.append(1.0)
+                    sig_ids_store[comp_key][set_dir] = set()
                     continue
 
                 df     = pd.read_csv(fpath)
@@ -95,6 +98,15 @@ for fc in FC_THRESHOLDS:
                 n = len(overlap_complete)
                 N = len(sig_pathways)
                 k = len(overlap_sig)
+
+                assert len(sig_pathways) == N, (
+                    f"{comp_key}/{set_dir}: sig pathway count mismatch — set={len(sig_pathways)}, N={N}"
+                )
+                assert len(overlap_sig) == k, (
+                    f"{comp_key}/{set_dir}: bone overlap count mismatch — set={len(overlap_sig)}, k={k}"
+                )
+
+                sig_ids_store[comp_key][set_dir] = sig_pathways
 
                 expected = (N * n) / M if M > 0 else 0
                 p        = hypergeom.sf(k - 1, M, n, N)
@@ -121,19 +133,29 @@ for fc in FC_THRESHOLDS:
             PATHWAY_N[comp_label]     = n_sig_list
             pathway_pvals[comp_label] = p_list
 
+        # ── Shared pathways (significant in both comparisons) ─────────────────
+
+        comp_keys_list = list(COMPARISONS.keys())
+        PATHWAY_N["Shared"] = [
+            len(sig_ids_store[comp_keys_list[0]][s] & sig_ids_store[comp_keys_list[1]][s])
+            for s in SET_DIRS
+        ]
+
         # ── Figure ────────────────────────────────────────────────────────────
 
         x          = np.arange(len(labels))
-        comparisons = list(PATHWAY_N.keys())
-        n_comp     = len(comparisons)
+        bar_comps  = list(PATHWAY_N.keys())       # Empty defect, PCL scaffold, Shared
+        pval_comps = list(pathway_pvals.keys())   # Empty defect, PCL scaffold
+        n_bar      = len(bar_comps)
+        n_pval     = len(pval_comps)
 
         fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(10.5, 4.5))
-        fig.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.28, wspace=0.32)
+        fig.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.30, wspace=0.32)
 
         # ── Panel (a): significant pathway counts ─────────────────────────────
 
-        for ci, comp in enumerate(comparisons):
-            offset    = (ci - (n_comp - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
+        for ci, comp in enumerate(bar_comps):
+            offset    = (ci - (n_bar - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
             positions = x + offset
             ax_a.bar(positions, PATHWAY_N[comp], width=BAR_WIDTH,
                      color=COLORS[comp], alpha=0.90,
@@ -153,12 +175,14 @@ for fc in FC_THRESHOLDS:
         ax_a.spines[["top", "right"]].set_visible(False)
         ax_a.set_xticks(x)
         ax_a.set_xticklabels(labels, fontsize=9)
+        ax_a.set_xlabel("Protein set", fontsize=10, labelpad=14)
         ax_a.text(-0.01, 1.02, "(a)", transform=ax_a.transAxes,
                   fontsize=11, fontweight="bold", va="bottom", ha="left")
 
         legend_handles = [
             mpatches.Patch(color=COLORS["Empty defect"], label="Empty defect"),
             mpatches.Patch(color=COLORS["PCL scaffold"],  label="PCL scaffold"),
+            mpatches.Patch(color=COLORS["Shared"],        label="Shared (both comparisons)"),
         ]
 
         # ── Panel (b): overlap significance — lollipop chart ─────────────────
@@ -166,9 +190,9 @@ for fc in FC_THRESHOLDS:
         all_neg_log = [-np.log10(p) for pvals in pathway_pvals.values() for p in pvals]
         ymax_b      = max(max(all_neg_log) * 1.22, -np.log10(0.05) * 1.5)
 
-        for ci, comp in enumerate(comparisons):
+        for ci, comp in enumerate(pval_comps):
             neg_log   = [-np.log10(p) for p in pathway_pvals[comp]]
-            offset    = (ci - (n_comp - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
+            offset    = (ci - (n_pval - 1) / 2) * (BAR_WIDTH + GROUP_GAP / 2)
             positions = x + offset
             for pos, val in zip(positions, neg_log):
                 val_clipped = min(val, ymax_b)
@@ -186,7 +210,7 @@ for fc in FC_THRESHOLDS:
         ax_b.text(-0.55, sig_line + ymax_b * 0.02, "p = 0.05",
                   ha="left", va="bottom", fontsize=8, color=LINE_COLOR)
 
-        ax_b.set_ylabel("−log₁₀(p-value)\n(overlap with bone-healing reference pathways)", fontsize=10, labelpad=6)
+        ax_b.set_ylabel("−log₁₀(p-value)\n(overlap of significantly enriched pathways\nwith bone-healing reference pathways)", fontsize=10, labelpad=6)
         ax_b.set_ylim(0, ymax_b)
         ax_b.set_xlim(-0.6, len(labels) - 0.4)
         ax_b.tick_params(axis="y", labelsize=9)
@@ -195,13 +219,14 @@ for fc in FC_THRESHOLDS:
         ax_b.spines[["top", "right"]].set_visible(False)
         ax_b.set_xticks(x)
         ax_b.set_xticklabels(labels, fontsize=9)
+        ax_b.set_xlabel("Protein set", fontsize=10, labelpad=14)
         ax_b.text(-0.01, 1.02, "(b)", transform=ax_b.transAxes,
                   fontsize=11, fontweight="bold", va="bottom", ha="left")
 
         # ── Shared legend centered below both panels ──────────────────────────
 
         fig.legend(handles=legend_handles, fontsize=9, frameon=False,
-                   loc="lower center", bbox_to_anchor=(0.53, 0.01), ncol=2,
+                   loc="lower center", bbox_to_anchor=(0.53, 0.01), ncol=3,
                    handlelength=1.2, handletextpad=0.5, columnspacing=1.2,
                    title="Comparison",
                    title_fontproperties={"weight": "bold", "size": 10})
@@ -237,9 +262,9 @@ README = pd.DataFrame([
     ("Column name", "Description"),
     ("FC threshold",               "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
     ("Stability threshold",        "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
-    ("Significant terms (N) | Tissue level DEPs",            "Significantly enriched pathways (p.adjust < 0.05), tissue-level DEPs."),
-    ("Significant terms (N) | Tissue level DEPs + network",  "Significantly enriched pathways (p.adjust < 0.05), tissue-level DEPs + network proteins."),
-    ("Significant terms (N) | First level DEPs",             "Significantly enriched pathways (p.adjust < 0.05), first-level DEPs."),
+    ("Significant terms (N) | Tissue level DEPs",            "Significantly enriched pathways (q-value < 0.05), tissue-level DEPs."),
+    ("Significant terms (N) | Tissue level DEPs + network",  "Significantly enriched pathways (q-value < 0.05), tissue-level DEPs + network proteins."),
+    ("Significant terms (N) | First level DEPs",             "Significantly enriched pathways (q-value < 0.05), first-level DEPs."),
     ("Bone terms significant (k) | Tissue level DEPs",           "Significant pathways also in the bone-healing reference, tissue-level DEPs."),
     ("Bone terms significant (k) | Tissue level DEPs + network", "Significant pathways also in the bone-healing reference, tissue-level DEPs + network proteins."),
     ("Bone terms significant (k) | First level DEPs",            "Significant pathways also in the bone-healing reference, first-level DEPs."),
