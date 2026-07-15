@@ -8,6 +8,13 @@ library(org.Rn.eg.db)
 library(proharmed)
 library(dplyr)
 
+cat("\n--- clusterProfiler enrichGO/enrichKEGG defaults used in this run ---\n")
+print(args(enrichGO))
+print(args(enrichKEGG))
+cat("clusterProfiler version:", as.character(packageVersion("clusterProfiler")), "\n")
+cat("org.Rn.eg.db version:", as.character(packageVersion("org.Rn.eg.db")), "\n")
+cat("-----------------------------------------------------------------\n\n")
+
 setwd("/home/ole/symbod_proteomics")
 
 citation("org.Rn.eg.db")
