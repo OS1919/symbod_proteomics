@@ -27,19 +27,15 @@ if (file.exists("renv.lock")) {
   }
 }
 
-install.packages("BiocManager")
-BiocManager::install("PRONE")
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+if (!requireNamespace("PRONE",       quietly = TRUE)) BiocManager::install("PRONE")
+if (!requireNamespace("POMA",        quietly = TRUE)) BiocManager::install("POMA")
 library("PRONE")
-
-BiocManager::install("POMA")
-library(POMA)
+library("POMA")
 
 library("data.table")
 library("ggplot2")
 library("SummarizedExperiment")
-library("patchwork")
-library("ggrepel")
-library("reshape2")
 
 # Set random number seed
 seed = 27
@@ -328,8 +324,7 @@ In this section, we focus on obtaining a preliminary overview of the proteomics 
 get_NA_overview(se, ain = "log2")
 
 p1 <- plot_condition_overview(se, condition = "Condition")
-p2 <- plot_condition_overview(se, condition = "Batch")
-p3 <- plot_heatmap(se = se, ain = "log2", color_by = c("Condition", "Scaffold"), label_by = "Animal")[["log2"]]
+p2 <- plot_heatmap(se = se, ain = "log2", color_by = c("Condition", "Scaffold"), label_by = "Animal")[["log2"]]
 
 file_type <- "png"
 
@@ -338,11 +333,10 @@ if(save_plots && !is.null(final_out_dir)){
   dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
    
   ggsave(filename = file.path(sub_dir, paste0("num_per_condition.", file_type)), plot = p1)
-  ggsave(filename = file.path(sub_dir, paste0("num_per_batch.", file_type)), plot = p2)
-  save_png(p = p3, filename = file.path(sub_dir, paste0("heatmap.", file_type)))
+  save_png(p = p2, filename = file.path(sub_dir, paste0("heatmap.", file_type)))
 }
 
-for (p in list(p1, p2, p3)){
+for (p in list(p1, p2)){
   print(p)
 }
 ```
@@ -410,7 +404,7 @@ available_methods <- get_normalization_methods()
 print(available_methods)
 
 # Define normalization methods
-normalization_methods <- c("RobNorm", "LoessF", "MAD", "Quantile")
+normalization_methods <- c("RobNorm", "LoessF")
 
 # Normalize the SummarizedExperiment object
 # Normalizes all assays in the object - which should just be the log2 one at this point
@@ -467,415 +461,30 @@ for (p in list(p1, p2)){
 }
 ```
 
-### Quantitative Evalutation
-In this segment, we delve into assessing the intragroup variation in our normalized proteomics dataset encapsulated in a `SummarizedExperiment` object. Understanding intragroup variation is crucial for evaluating the consistency of data within experimental conditions or groups.
-- `Intragroup Correlation`: The `plot_intragroup_correlation` function calculates and visualizes the correlation within groups. This is useful for assessing the similarity or consistency of data within each condition or group.
-    - `se`: The normalized `SummarizedExperiment` object.
-    - `ain`: A vector of strings indicating which assays to use as input. If `NULL`, all normalized assays are considered.
-    - `condition`: Column name specifying the condition for grouping. If `NULL`, the default condition column of the `SummarizedExperiment` object is used.
-    - `method`: Correlation method (pearson, spearman, or kendall).
-- `Pooled Coefficient of Variation (PCV)`: The `plot_intragroup_PCV` function calculates and visualizes the pooled coefficient of variation within groups.
-    - `se`: The `SummarizedExperiment` object containing normalized data.
-    - `ain`: A vector of strings indicating which assays to use as input. If `NULL`, all assays are considered.
-    - `condition`: Column name specifying the condition for grouping.
-    - `diff`: A boolean indicating whether to visualize the reduction of intragroup variation compared to log-transformed data.
-- `Pooled Median Absolute Deviation (PMAD)`: The `plot_intragroup_PMAD` function showcases the median absolute deviation within groups.
-    - `se`: The normalized `SummarizedExperiment` object.
-    - `ain`: A vector of strings indicating which assays to use as input.
-    - `condition`: Column name for grouping.
-    - `diff`: Boolean indicating whether to compare variation reduction to log-transformed data.
-- `Pooled Estimate of Variance (PEV)`: The `plot_intragroup_PEV` function visualizes the pooled estimate of variance within groups.
-    - `se`: The `SummarizedExperiment` object.
-    - `ain`: A vector of strings indicating which assays to use.
-    - `condition`: Column name specifying the condition for grouping.
-    - `diff`: Boolean indicating if variation reduction compared to log-transformed data should be visualized.
+### Quantitative Evaluation
+In this segment, we assess the intragroup correlation across normalization methods using the diabetic and non-diabetic condition groups. Intragroup correlation measures how consistently samples within the same condition group behave — higher correlation indicates better within-group reproducibility after normalization. We use PRONE's `plot_intragroup_correlation` for a visual comparison across methods, and additionally compute pairwise Pearson correlation statistics (mean ± SD) per condition group and method for a numeric summary.
 
 ```{r}
 plotted_methods = c(normalization_methods, "log2")
 ```
 
-### Plot intragroup correlation metrics
-```{r}
-analyze_intragroup_correlation <- function(se, ain = NULL, group_vars = c("Condition", "Scaffold"), create_plots = TRUE) {
-  if (is.null(ain)) {
-    ain <- names(assays(se))
-  }
-  
-  # Prepare results storage
-  all_results <- list()
-  median_results <- list()
-  
-  # Process each group variable
-  for (group_var in group_vars) {
-    group_results <- data.frame()
-    method_medians <- c()
-    method_names <- c()
-    
-    # Process each method
-    for (method in ain) {
-      # Get data for this normalization method
-      data_matrix <- assay(se, method)
-      groups <- se[[group_var]]
-      
-      # Calculate intra-group correlations for all samples
-      intra_correlations <- c()
-      
-      # Get unique groups
-      unique_groups <- unique(groups)
-      
-      # Process each group separately
-      for (group_level in unique_groups) {
-        # Get indices for this group
-        group_indices <- which(groups == group_level)
-        
-        # Skip if too few samples in group
-        if (length(group_indices) < 2) {
-          next
-        }
-        
-        # Get data for this group - handle both matrix and data.table cases
-        if (is.data.table(data_matrix)) {
-          # For data.table we need special syntax
-          group_data <- data_matrix[, ..group_indices]
-        } else {
-          # For regular matrix
-          group_data <- data_matrix[, group_indices, drop = FALSE]
-        }
-        
-        # Calculate pairwise correlations for all sample pairs in this group
-        if (ncol(group_data) >= 2) {
-          # Calculate correlation for each pair of samples
-          n_samples <- ncol(group_data)
-          
-          for (i in 1:(n_samples-1)) {
-            for (j in (i+1):n_samples) {
-              # Get data for this pair
-              if (is.data.table(group_data)) {
-                x <- group_data[[i]]
-                y <- group_data[[j]]
-              } else {
-                x <- group_data[, i]
-                y <- group_data[, j]
-              }
-              
-              # Calculate correlation, skipping NA/NaN values
-              valid_indices <- !is.na(x) & !is.na(y)
-              if (sum(valid_indices) >= 3) { # Need at least 3 points for meaningful correlation
-                cor_val <- cor(x[valid_indices], y[valid_indices], method = "pearson")
-                if (!is.na(cor_val)) {
-                  intra_correlations <- c(intra_correlations, cor_val)
-                }
-              }
-            }
-          }
-        }
-      }
-      
-      # Skip if no valid calculations
-      if (length(intra_correlations) == 0) next
-      
-      # Store the detailed results for boxplots
-      method_results <- data.frame(
-        Method = rep(method, length(intra_correlations)),
-        Correlation = intra_correlations
-      )
-      group_results <- rbind(group_results, method_results)
-      
-      # Calculate and store median for comparison plot
-      median_var <- median(intra_correlations)
-      method_medians <- c(method_medians, median_var)
-      method_names <- c(method_names, method)
-    }
-    
-    # Store results for this group variable
-    all_results[[group_var]] <- group_results
-    median_results[[group_var]] <- data.frame(
-      Method = method_names,
-      Median = method_medians
-    )
-  }
-  
-  # Create plots if requested
-  plots <- list()
-  
-  if (create_plots) {
-    library(ggplot2)
-    
-    # Create boxplots for each group variable
-    for (group_var in group_vars) {
-      p <- ggplot(all_results[[group_var]], aes(x = Method, y = Correlation, fill = Method)) +
-        geom_boxplot(outlier.color = "black", outlier.size = 1) +
-        scale_fill_brewer(palette = "Set3") +
-        theme_bw() +
-        theme(
-          axis.text.x = element_text(angle = 45, hjust = 1),
-          legend.position = "right"
-        ) +
-        labs(
-          title = paste("Intragroup Correlation \nby", group_var),
-          y = "Pearson correlation between sample pairs \nwithin each group",
-          x = "Normalization Method"
-        )
-      
-      plots[[paste0("boxplot_", group_var)]] <- p
-    }
-    
-    # Create comparison scatter plot if we have multiple group variables
-    if (length(group_vars) >= 2) {
-      # Merge the first two group variables (common use case)
-      var1 <- group_vars[1]
-      var2 <- group_vars[2]
-      
-      comparison_data <- merge(
-        median_results[[var1]], 
-        median_results[[var2]], 
-        by = "Method"
-      )
-      names(comparison_data) <- c("Method", paste0(var1, "_Median"), paste0(var2, "_Median"))
-      
-      # Create scatterplot
-      p_scatter <- ggplot(comparison_data, 
-                         aes_string(x = paste0(var1, "_Median"), 
-                                   y = paste0(var2, "_Median"), 
-                                   label = "Method")) +
-        geom_point(aes(color = Method), size = 3) +
-        geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
-        theme_bw() +
-        labs(
-          title = paste("Medians of Intragroup Correlation Coefficients"),
-          x = paste("Median of Pearson correlation coefficient \nwithin each", var1, "group"),
-          y = paste("Median of Pearson correlation coefficient \nwithin each", var2, "group")
-        ) +
-        theme(legend.position = "none")
-      
-      plots[["comparison_scatter"]] <- p_scatter
-    }
-  }
-  
-  # Return comprehensive results
-  return(list(
-    detailed_results = all_results,
-    median_results = median_results,
-    plots = plots
-  ))
-}
-
-# 
-corr_results <- analyze_intragroup_correlation(
-  se = se_normalized, 
+### Intragroup Correlation by Condition
+```{r intragroup_correlation}
+p_intra_corr <- plot_intragroup_correlation(
+  se_normalized,
   ain = plotted_methods,
-  group_vars = c("Condition", "Scaffold"),
-  create_plots = TRUE
+  condition = "Condition",
+  method = "pearson"
 )
 
-# Display boxplots
-intra_corr_cond_plot = corr_results$plots$boxplot_Condition
-intra_corr_cond_plot <- intra_corr_cond_plot + theme(legend.position = "none")
-intra_corr_scaff_plot = corr_results$plots$boxplot_Scaffold
-combined_plot <- intra_corr_cond_plot | intra_corr_scaff_plot
-print(combined_plot)
-
-# Display scatter plot comparing medians
-print(corr_results$plots$comparison_scatter)
-
-# Save correlation plots
 if(save_plots && !is.null(final_out_dir)){
   sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
   dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  save_png(filename = file.path(sub_dir, "intragroup_correlation_condition.png"), p = combined_plot)
-  save_png(filename = file.path(sub_dir, "intragroup_correlation_comparison.png"), p = corr_results$plots$comparison_scatter)
-}
-```
 
-### Create combined plots of intergroup and intragroup variation for Condition
-```{r}
-# Calculate both intragroup and intergroup variation, create ONE combined plot
-
-# Storage for results
-intragroup_medians <- c()
-intergroup_medians <- c()
-method_names <- c()
-
-# Calculate both metrics for each method
-for (method in plotted_methods) {
-  data_matrix <- assay(se_normalized, method)
-  groups <- se_normalized[["Condition"]]
-  
-  # Calculate intragroup variation (PMAD)
-  pmad_values <- c()
-  for (i in 1:nrow(data_matrix)) { # For each protein
-    feature_data <- as.numeric(data_matrix[i,]) # Get the protein values
-    grouped_data <- split(feature_data, factor(groups)) # Split by group/condition
-    
-    group_mads <- c()
-    group_sizes <- c()
-    
-    # For each condition group, calculate MAD
-    for (group_level in names(grouped_data)) {
-      # Get the protein expression values for samples in this condition
-      group_values <- grouped_data[[group_level]]
-      group_values <- group_values[!is.na(group_values)]
-      
-      # MAD = median(|x_i - median(x)|)
-      if (length(group_values) >= 2) {
-        group_mads <- c(group_mads, mad(group_values, na.rm = TRUE))
-        group_sizes <- c(group_sizes, length(group_values))
-      }
-    }
-    
-    # PMAD = (MAD₁ × n₁ + MAD₂ × n₂ + ...) / (n₁ + n₂ + ...)
-    if (length(group_mads) > 0) {
-      pmad <- sum(group_mads * group_sizes) / sum(group_sizes)
-      pmad_values <- c(pmad_values, pmad)
-    }
-  }
-  
-  # Calculate intergroup variation
-  between_variations <- c()
-  for (i in 1:nrow(data_matrix)) {
-    feature_data <- as.numeric(data_matrix[i,])
-    grouped_data <- split(feature_data, factor(groups))
-    group_means <- sapply(grouped_data, mean, na.rm = TRUE)
-    
-    if (!any(is.na(group_means))) {
-      between_var <- sd(group_means)
-      between_variations <- c(between_variations, between_var)
-    }
-  }
-  
-  # Store medians
-  if (length(pmad_values) > 0 && length(between_variations) > 0) {
-    intragroup_medians <- c(intragroup_medians, median(pmad_values))
-    intergroup_medians <- c(intergroup_medians, median(between_variations))
-    method_names <- c(method_names, method)
-  }
+  save_png(filename = file.path(sub_dir, "intragroup_correlation_condition.png"), p = p_intra_corr)
 }
 
-# Create combined data
-combined_data <- data.frame(
-  Method = method_names,
-  Intragroup_PMAD = intragroup_medians,
-  Intergroup_Variation = intergroup_medians
-)
-
-all_values <- c(combined_data$Intragroup_PMAD, combined_data$Intergroup_Variation)
-axis_min <- min(all_values, na.rm = TRUE)
-axis_max <- max(all_values, na.rm = TRUE)
-
-condition_plot <- ggplot(combined_data, aes(x = Intragroup_PMAD, y = Intergroup_Variation, label = Method)) +
-  geom_point(aes(color = Method), size = 4, alpha = 0.8) +
-  geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
-  scale_x_reverse(limits = c(axis_max, axis_min)) +
-  scale_y_continuous(limits = c(axis_min, axis_max)) +
-  coord_fixed(ratio = 1) +
-  theme_bw() +
-  labs(
-    title = "Normalization Method Comparison: Condition Groups",
-    x = "Intragroup Variation (PMAD)",
-    y = "Intergroup Variation\n(Standard deviation of group means)",
-    color = "Method"
-  ) +
-  theme(legend.position = "right")
-
-sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
-save_png(filename = file.path(sub_dir, "varations_by_condition.png"), p = condition_plot)
-print(condition_plot)
-```
-
-### Create combined plots of intergroup and intragroup variation for Scaffold
-```{r}
-# Calculate both intragroup and intergroup variation, create ONE combined plot
-
-# Storage for results
-intragroup_medians <- c()
-intergroup_medians <- c()
-method_names <- c()
-
-# Calculate both metrics for each method
-for (method in plotted_methods) {
-  data_matrix <- assay(se_normalized, method)
-  groups <- se_normalized[["Scaffold"]]
-  
-  # Calculate intragroup variation (PMAD)
-  pmad_values <- c()
-  for (i in 1:nrow(data_matrix)) { # For each protein
-    feature_data <- as.numeric(data_matrix[i,]) # Get the protein values
-    grouped_data <- split(feature_data, factor(groups)) # Split by group/condition
-    
-    group_mads <- c()
-    group_sizes <- c()
-    
-    # For each condition group, calculate MAD
-    for (group_level in names(grouped_data)) {
-      # Get the protein expression values for samples in this condition
-      group_values <- grouped_data[[group_level]]
-      group_values <- group_values[!is.na(group_values)]
-      
-      # MAD = median(|x_i - median(x)|)
-      if (length(group_values) >= 2) {
-        group_mads <- c(group_mads, mad(group_values, na.rm = TRUE))
-        group_sizes <- c(group_sizes, length(group_values))
-      }
-    }
-    
-    # PMAD = (MAD₁ × n₁ + MAD₂ × n₂ + ...) / (n₁ + n₂ + ...)
-    if (length(group_mads) > 0) {
-      pmad <- sum(group_mads * group_sizes) / sum(group_sizes)
-      pmad_values <- c(pmad_values, pmad)
-    }
-  }
-  
-  # Calculate intergroup variation
-  between_variations <- c()
-  for (i in 1:nrow(data_matrix)) {
-    feature_data <- as.numeric(data_matrix[i,])
-    grouped_data <- split(feature_data, factor(groups))
-    group_means <- sapply(grouped_data, mean, na.rm = TRUE)
-    
-    if (!any(is.na(group_means))) {
-      between_var <- sd(group_means)
-      between_variations <- c(between_variations, between_var)
-    }
-  }
-  
-  # Store medians
-  if (length(pmad_values) > 0 && length(between_variations) > 0) {
-    intragroup_medians <- c(intragroup_medians, median(pmad_values))
-    intergroup_medians <- c(intergroup_medians, median(between_variations))
-    method_names <- c(method_names, method)
-  }
-}
-
-# Create combined data
-combined_data <- data.frame(
-  Method = method_names,
-  Intragroup_PMAD = intragroup_medians,
-  Intergroup_Variation = intergroup_medians
-)
-
-all_values <- c(combined_data$Intragroup_PMAD, combined_data$Intergroup_Variation)
-axis_min <- min(all_values, na.rm = TRUE)
-axis_max <- max(all_values, na.rm = TRUE)
-
-scaffold_plot <- ggplot(combined_data, aes(x = Intragroup_PMAD, y = Intergroup_Variation, label = Method)) +
-  geom_point(aes(color = Method), size = 4, alpha = 0.8) +
-  geom_text_repel(size = 3, box.padding = 0.5, point.padding = 0.3) +
-  scale_x_reverse(limits = c(axis_max, axis_min)) +
-  scale_y_continuous(limits = c(axis_min, axis_max)) +
-  coord_fixed(ratio = 1) +
-  theme_bw() +
-  labs(
-    title = "Normalization Method Comparison: Scaffold Groups",
-    x = "Intragroup Variation (PMAD)",
-    y = "Intergroup Variation\n(Standard deviation of group means)",
-    color = "Method"
-  ) +
-  theme(legend.position = "right")
-
-sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
-save_png(filename = file.path(sub_dir, "varations_by_scaffold.png"), p = scaffold_plot)
-print(scaffold_plot)
+print(p_intra_corr)
 ```
 
 
