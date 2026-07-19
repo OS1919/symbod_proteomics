@@ -85,7 +85,7 @@ venn_legend = [
 ]
 
 both_sets    = []
-group_tables = {}   # {title: {ai_only, as_only, both}} — collected for Excel output
+group_tables = {}   # {title: {ai_only, as_only, both}}
 
 for ax_v, (genotype, scaffold, title), color in zip(venn_axes, GROUPS, GROUP_COLORS):
     ai_cols = samples_for("AI", genotype, scaffold)
@@ -118,37 +118,6 @@ pd.DataFrame([
     for p in sorted(as_only_all_groups)
 ]).to_csv(os.path.join(OUT_DIR, "AS_exclusive_all_groups.csv"), index=False)
 print(f"Saved AS-exclusive list → {os.path.join(OUT_DIR, 'AS_exclusive_all_groups.csv')}")
-
-# ── Supplement Excel: one sheet per group, three side-by-side protein lists ───
-def make_sheet_df(proteins_ai, proteins_as, proteins_both):
-    """Build a DataFrame with three side-by-side columns sets, padded to equal length."""
-    def to_rows(proteins):
-        return [(p, id_to_gene.get(p, "")) for p in sorted(proteins)]
-    rows_ai   = to_rows(proteins_ai)
-    rows_as   = to_rows(proteins_as)
-    rows_both = to_rows(proteins_both)
-    n = max(len(rows_ai), len(rows_as), len(rows_both))
-    pad = ("", "")
-    rows_ai   += [pad] * (n - len(rows_ai))
-    rows_as   += [pad] * (n - len(rows_as))
-    rows_both += [pad] * (n - len(rows_both))
-    return pd.DataFrame({
-        "AI only — Protein ID":  [r[0] for r in rows_ai],
-        "AI only — Gene name":   [r[1] for r in rows_ai],
-        "AS only — Protein ID":  [r[0] for r in rows_as],
-        "AS only — Gene name":   [r[1] for r in rows_as],
-        "Both — Protein ID":     [r[0] for r in rows_both],
-        "Both — Gene name":      [r[1] for r in rows_both],
-    })
-
-excel_path = os.path.join(OUT_DIR, "supplement_ai_as_protein_lists.xlsx")
-with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-    for title, sets in group_tables.items():
-        sheet_name = title[:31]   # Excel sheet names are capped at 31 characters
-        make_sheet_df(sets["ai_only"], sets["as_only"], sets["both"]).to_excel(
-            writer, sheet_name=sheet_name, index=False
-        )
-print(f"Saved supplement table → {excel_path}")
 
 # ── Scatter ───────────────────────────────────────────────────────────────────
 all_x, all_y = [], []
