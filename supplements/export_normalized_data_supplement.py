@@ -51,7 +51,7 @@ README = pd.DataFrame([
     ("RemappedGeneNames",        "Remapped gene names."),
     ("Gene.Names",               "Gene symbols."),
     ("Orthologs",                "Human ortholog gene symbols."),
-    ("<sample columns>",         "RobNorm-normalized log2 abundances (scaled in scaled sheets). Missing = not quantified."),
+    ("<sample columns>",         "RobNorm-normalized log2 abundances (scaled in scaled sheets). Missing = not detected."),
     ("",                         ""),
     ("Metadata column",          "Description"),
     ("sample_name",              "Sample identifier."),
