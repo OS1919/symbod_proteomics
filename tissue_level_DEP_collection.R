@@ -66,6 +66,19 @@ cat("Matched", nrow(matched_samples), "AI/AS sample pairs\n\n")
 # HELPER FUNCTIONS
 ############################################
 
+# Per-protein indicator: does ANY of a protein's candidate orthologs (a
+# semicolon-separated string, since rat-to-human orthology can be ambiguous)
+# appear in a reference gene list? Each protein contributes at most one hit,
+# regardless of how many candidate orthologs it lists — the orthologs all
+# refer to the same single measured protein, so they must not be counted
+# individually (that would let ambiguous, multi-paralog proteins inflate
+# overlap counts relative to unambiguous ones).
+any_ortholog_in <- function(ortholog_strings, ref_genes) {
+  sapply(strsplit(as.character(ortholog_strings), ";"), function(orths) {
+    any(toupper(trimws(orths)) %in% ref_genes)
+  })
+}
+
 # Parse a group name like "diabetic_PCL_42" from a comparison
 parse_group <- function(group_str) {
   parts <- strsplit(group_str, "_")[[1]]
@@ -419,9 +432,7 @@ for (fc_thresh in fc_thresholds) {
       tested_orthologs_ai <- de_results_AI[de_results_AI$Comparison == comp, "Orthologs"]
       tested_orthologs_as <- de_results_AS[de_results_AS$Comparison == comp, "Orthologs"]
       all_tested_orthologs <- unique(c(tested_orthologs_ai, tested_orthologs_as))
-      tested_genes <- toupper(sapply(strsplit(as.character(all_tested_orthologs), ";"), `[`, 1))
-      tested_genes <- unique(tested_genes)
-      bone_caps_tested <- sum(tested_genes %in% meta_genes, na.rm = TRUE)
+      bone_caps_tested <- sum(any_ortholog_in(all_tested_orthologs, meta_genes), na.rm = TRUE)
       
       deps_ai_count <- sum(de_results_AI$Comparison == comp & de_results_AI$Change != "No Change")
       deps_as_count <- sum(de_results_AS$Comparison == comp & de_results_AS$Change != "No Change")
@@ -434,9 +445,8 @@ for (fc_thresh in fc_thresholds) {
         de_results_AI[de_results_AI$Comparison == comp & de_results_AI$Change != "No Change", "Orthologs"],
         de_results_AS[de_results_AS$Comparison == comp & de_results_AS$Change != "No Change", "Orthologs"]
       ))
-      all_dep_genes <- toupper(sapply(strsplit(as.character(all_dep_orthologs), ";"), `[`, 1))
-      all_dep_genes <- unique(all_dep_genes)
-      overlap_total <- sum(all_dep_genes %in% meta_genes, na.rm = TRUE)
+      all_dep_genes <- unique(toupper(trimws(unlist(strsplit(as.character(all_dep_orthologs), ";")))))
+      overlap_total <- sum(any_ortholog_in(all_dep_orthologs, meta_genes), na.rm = TRUE)
       
       validated_count <- ifelse(comp %in% names(all_validated_deps),
                                 nrow(all_validated_deps[[comp]]), 0)
@@ -450,14 +460,10 @@ for (fc_thresh in fc_thresholds) {
         first_level_proteins <- validated[
           validated$Validation == "Significant in both fractions (same direction)" |
             grepl("Exclusive to", validated$Validation), ]
-        first_level_genes <- toupper(sapply(strsplit(as.character(first_level_proteins$Orthologs), ";"), `[`, 1))
-        first_level_genes <- unique(first_level_genes)
-        overlap_first_level <- sum(first_level_genes %in% meta_genes, na.rm = TRUE)
-        
+        overlap_first_level <- sum(any_ortholog_in(first_level_proteins$Orthologs, meta_genes), na.rm = TRUE)
+
         second_level_proteins <- validated[grepl("Dominant and stable in", validated$Validation), ]
-        second_level_genes <- toupper(sapply(strsplit(as.character(second_level_proteins$Orthologs), ";"), `[`, 1))
-        second_level_genes <- unique(second_level_genes)
-        overlap_second_level <- sum(second_level_genes %in% meta_genes, na.rm = TRUE)
+        overlap_second_level <- sum(any_ortholog_in(second_level_proteins$Orthologs, meta_genes), na.rm = TRUE)
       } else {
         n_both <- 0; n_dominant_stable <- 0; n_exclusive <- 0
         overlap_first_level <- 0; overlap_second_level <- 0

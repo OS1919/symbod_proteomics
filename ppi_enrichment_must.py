@@ -56,8 +56,11 @@ for comparison in COMPARISONS:
             else comp_df[comp_df["Validation"].notna()]
         )
 
+        # Rat-to-human orthology can be ambiguous (a protein may list several
+        # candidate orthologs); pick one deterministically per protein so seed
+        # genes are reproducible rather than depending on upstream mapping order.
         my_genes = list(set(
-            gene.split(";")[0]
+            sorted(gene.split(";"))[0]
             for gene in filtered_df["Orthologs"].dropna()
         ))
 

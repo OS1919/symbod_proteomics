@@ -55,13 +55,16 @@ def get_genes(comparison, protein_set, base_dir, fc_thresh, stab_thresh):
     df = pd.read_csv(validated_file)
     df = df[df['Comparison'] == comparison]
 
+    # Rat-to-human orthology can be ambiguous (a protein may list several
+    # candidate orthologs); pick one deterministically per protein so seed
+    # genes are reproducible rather than depending on upstream mapping order.
     if protein_set == 'set1_tissue_level':
         # All tissue-level DEPs (first-level + second-level)
-        genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
+        genes = [sorted(gene.split(';'))[0] for gene in df['Orthologs'].dropna().tolist()]
 
     elif protein_set == 'set2_tissue_plus_network':
         # All tissue-level DEPs + connector proteins (from both_levels network run)
-        genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
+        genes = [sorted(gene.split(';'))[0] for gene in df['Orthologs'].dropna().tolist()]
 
         exception_file = f'network_enrichment_results/{comparison}/both_levels/exception_proteins.csv'
         if os.path.exists(exception_file):
@@ -74,7 +77,7 @@ def get_genes(comparison, protein_set, base_dir, fc_thresh, stab_thresh):
     elif protein_set == 'set3_first_level':
         # First-level DEPs only
         df = df[df['Validation'].str.contains('Exclusive to |(same direction)', regex=True)]
-        genes = [gene.split(';')[0] for gene in df['Orthologs'].dropna().tolist()]
+        genes = [sorted(gene.split(';'))[0] for gene in df['Orthologs'].dropna().tolist()]
 
     else:
         raise ValueError(f"Unknown protein set: {protein_set}")
