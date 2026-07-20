@@ -166,7 +166,7 @@ for fc in FC_THRESHOLDS:
 
         ymax_a = max(v for vals in PATHWAY_N.values() for v in vals) * 1.28
         ymax_a = max(ymax_a, 10)  # minimum sensible axis height
-        ax_a.set_ylabel("Number of significant pathways", fontsize=10, labelpad=6)
+        ax_a.set_ylabel("Number of significantly enriched pathways", fontsize=10, labelpad=6)
         ax_a.set_ylim(0, ymax_a)
         ax_a.set_xlim(-0.6, len(labels) - 0.4)
         ax_a.tick_params(axis="y", labelsize=9)
