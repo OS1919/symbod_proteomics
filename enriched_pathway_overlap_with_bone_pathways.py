@@ -112,8 +112,8 @@ for fc in FC_THRESHOLDS:
                 p        = hypergeom.sf(k - 1, M, n, N)
 
                 _results.append({
-                    "FC threshold":          fc,
-                    "Stability threshold":   stab,
+                    "AR threshold":          fc,
+                    "ΔAR":                   stab,
                     "Comparison":            comp_label,
                     "Protein set":           set_dir,
                     "Terms tested (M)":      M,
@@ -260,8 +260,8 @@ README = pd.DataFrame([
     ("PCL scaffold", "Diabetic vs. non-diabetic, PCL scaffold."),
     ("",            ""),
     ("Column name", "Description"),
-    ("FC threshold",               "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
-    ("Stability threshold",        "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+    ("AR threshold",               "Abundance ratio threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+    ("ΔAR",                        "Stability threshold: minimum ratio of group-level geometric mean abundance ratios required for a second-level DEP to be considered stable across groups."),
     ("Significant terms (N) | Tissue level DEPs",            "Significantly enriched pathways (q-value < 0.05), tissue-level DEPs."),
     ("Significant terms (N) | Tissue level DEPs + network",  "Significantly enriched pathways (q-value < 0.05), tissue-level DEPs + network proteins."),
     ("Significant terms (N) | First level DEPs",             "Significantly enriched pathways (q-value < 0.05), first-level DEPs."),
@@ -282,7 +282,7 @@ with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
     for comp_label in COMPARISONS.values():
         subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
         pivot  = subset.pivot(
-            index=["FC threshold", "Stability threshold"],
+            index=["AR threshold", "ΔAR"],
             columns="Protein set",
             values=["Significant terms (N)", "Bone terms significant (k)", "Expected overlap", "p-value"],
         )

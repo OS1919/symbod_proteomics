@@ -2,7 +2,7 @@
 Exports the pathway enrichment results into a single Excel file.
 Both comparisons are combined in each sheet — the 'Comparison' column distinguishes them.
 
-set1 (tis level) and set2 (tis+netwk): 9 sheets each (3 FC × 3 stab), named "{fc}-{stab} {label}"
+set1 (tis level) and set2 (tis+netwk): 9 sheets each (3 AR × 3 stability), named "AR{fc}-ΔAR{stab} {label}"
 set3 (1st level): 1 sheet only — threshold-independent.
 
 Output: pathway_enrichment_supplement.xlsx  — 19 sheets total
@@ -25,13 +25,13 @@ OUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pathway_enr
 
 README = pd.DataFrame([
     ("Sheet name",         "Content"),
-    ("FC{fc}-{stab} tis level",  "Tissue-level DEPs; one sheet per FC × stability threshold (9 total)."),
-    ("FC{fc}-{stab} tis+netwk",  "Tissue-level DEPs + network proteins; one sheet per FC × stability threshold (9 total)."),
+    ("AR<value>-ΔAR<value> tis level",  "Tissue-level DEPs; one sheet per AR × stability threshold (9 total)."),
+    ("AR<value>-ΔAR<value> tis+netwk",  "Tissue-level DEPs + network proteins; one sheet per AR × stability threshold (9 total)."),
     ("1st level",                "First-level DEPs; single sheet, threshold-independent."),
     ("",             ""),
     ("Threshold",           "Description"),
-    ("{fc}",               "FC threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
-    ("{stab}",             "Stability threshold: minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+    ("AR",                 "Abundance ratio threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+    ("ΔAR",                "Stability threshold: minimum ratio of group-level geometric mean abundance ratios required for a second-level DEP to be considered stable across groups."),
     ("",             ""),
     ("Protein set",  "Description"),
     ("tis level",    "Tissue-level DEPs (first- and second-level combined)."),
@@ -85,7 +85,7 @@ with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
                 if not frames:
                     continue
                 df = pd.concat(frames, ignore_index=True)
-                sheet_name = f"{fc}-{stab} {set_label}"
+                sheet_name = f"AR{fc}-ΔAR{stab} {set_label}"
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
                 print(f"  {sheet_name}: {len(df)} rows")
 

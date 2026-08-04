@@ -117,14 +117,14 @@ for fc in FC_THRESHOLDS:
                 ("First-level DEPs",                     s3, o3, expected3, p3),
             ]:
                 _results.append({
-                    "FC threshold":             fc,
-                    "Stability threshold":      stab,
+                    "AR threshold":             fc,
+                    "ΔAR":                      stab,
                     "Comparison":               comp_label,
                     "Protein set":              set_label,
                     "Proteome size (M)":        M,
-                    "Bone CAPs in proteome (n)": n,
+                    "Bone-healing reference proteins in proteome (n)": n,
                     "Protein set size (N)":     s,
-                    "Bone CAPs overlap (k)":    o,
+                    "Bone-healing reference protein overlap (k)":    o,
                     "Expected overlap":         expected,
                     "p-value":                  p,
                 })
@@ -257,14 +257,14 @@ README = pd.DataFrame([
     ("PCL scaffold", "Diabetic vs. non-diabetic, PCL scaffold."),
     ("",             ""),
     ("Column name",  "Description"),
-    ("FC threshold",              "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
-    ("Stability threshold",       "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+    ("AR threshold",              "Abundance ratio threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+    ("ΔAR",                       "Stability threshold: minimum ratio of group-level geometric mean abundance ratios required for a second-level DEP to be considered stable across groups."),
     ("Protein set size (N) | Tissue-level DEPs",                    "Number of tissue-level DEPs."),
     ("Protein set size (N) | Tissue-level DEPs + connector proteins","Number of tissue-level DEPs + network connector proteins."),
     ("Protein set size (N) | First-level DEPs",                     "Number of first-level DEPs."),
-    ("Bone CAPs overlap (k) | Tissue-level DEPs",                    "Tissue-level DEPs also in the bone CAPs reference."),
-    ("Bone CAPs overlap (k) | Tissue-level DEPs + connector proteins","Tissue-level DEPs + connectors also in the bone CAPs reference."),
-    ("Bone CAPs overlap (k) | First-level DEPs",                     "First-level DEPs also in the bone CAPs reference."),
+    ("Bone-healing reference protein overlap (k) | Tissue-level DEPs",                    "Tissue-level DEPs also in the bone-healing reference proteins."),
+    ("Bone-healing reference protein overlap (k) | Tissue-level DEPs + connector proteins","Tissue-level DEPs + connectors also in the bone-healing reference proteins."),
+    ("Bone-healing reference protein overlap (k) | First-level DEPs",                     "First-level DEPs also in the bone-healing reference proteins."),
     ("Expected overlap | Tissue-level DEPs",                    "Expected overlap under hypergeometric null, tissue-level DEPs."),
     ("Expected overlap | Tissue-level DEPs + connector proteins","Expected overlap under hypergeometric null, tissue-level DEPs + connectors."),
     ("Expected overlap | First-level DEPs",                     "Expected overlap under hypergeometric null, first-level DEPs."),
@@ -275,16 +275,16 @@ README = pd.DataFrame([
 
 with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
     README.to_excel(writer, sheet_name="README", index=False, header=False, startrow=2)
-    writer.sheets["README"]["A1"] = "Protein Set Overlap with Bone-Healing Reference Proteins (CAPs)"
+    writer.sheets["README"]["A1"] = "Protein Set Overlap with Bone-Healing Reference Proteins"
     for comp_label in COMPARISONS.values():
         subset = results_df[results_df["Comparison"] == comp_label].drop(columns="Comparison")
         pivot  = subset.pivot(
-            index=["FC threshold", "Stability threshold"],
+            index=["AR threshold", "ΔAR"],
             columns="Protein set",
-            values=["Protein set size (N)", "Bone CAPs overlap (k)", "Expected overlap", "p-value"],
+            values=["Protein set size (N)", "Bone-healing reference protein overlap (k)", "Expected overlap", "p-value"],
         )
         pivot = pivot.reindex(columns=pd.MultiIndex.from_product([
-            ["Protein set size (N)", "Bone CAPs overlap (k)", "Expected overlap", "p-value"],
+            ["Protein set size (N)", "Bone-healing reference protein overlap (k)", "Expected overlap", "p-value"],
             PROTEIN_SET_ORDER,
         ]))
         pivot.columns = [f"{metric} | {pset}" for metric, pset in pivot.columns]

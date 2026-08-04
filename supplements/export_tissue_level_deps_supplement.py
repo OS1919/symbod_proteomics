@@ -3,7 +3,7 @@ Exports the validated DEPs for every threshold combination and comparison into
 a single Excel file, one sheet per (threshold combination × comparison).
 
 Output: validated_deps_supplement.xlsx  — 18 sheets (9 thresholds × 2 comparisons)
-Sheet naming: "FC{fc} Stab{stab} {comparison label}"
+Sheet naming: "AR{fc} ΔAR{stab} {comparison label}"
 """
 
 import os
@@ -23,11 +23,11 @@ OUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tissue_leve
 
 README = pd.DataFrame([
     ("Sheet name",           "Content"),
-    ("FC{fc} Stab{stab} {comparison}", "e.g. FC5.59 Stab1.2 Empty defect. One sheet per threshold × comparison (18 total)."),
+    ("AR<value> ΔAR<value> <comparison>", "e.g. AR5.59 ΔAR1.2 Empty defect. One sheet per threshold × comparison (18 total)."),
     ("",                     ""),
     ("Threshold",            "Description"),
-    ("{fc}",                 "FC threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
-    ("{stab}",               "Stability threshold: minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+    ("AR",                   "Abundance ratio threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+    ("ΔAR",                  "Stability threshold: minimum ratio of group-level geometric mean abundance ratios required for a second-level DEP to be considered stable across groups."),
     ("",                     ""),
     ("Column name",          "Description"),
     ("Protein.IDs",          "UniProt accessions."),
@@ -36,13 +36,20 @@ README = pd.DataFrame([
     ("Direction",            "Up or Down."),
     ("DEP_in_AI",            "Boolean whether protein is DEP in AI."),
     ("DEP_in_AS",            "Boolean whether protein is DEP in AS."),
-    ("FC_between_fractions", "Fold change between fractions."),
+    ("AR_between_fractions", "Abundance ratio between fractions."),
     ("Dominant_Fraction",    "Dominant fraction (AI or AS) according to comparison-level abundance ratio."),
     ("Validation",           "Validation reason for the protein being a tissue-level DEP."),
-    ("GeoMeanFC_Group1",     "Geometric mean FC across diabetic samples of the comparison."),
-    ("GeoMeanFC_Group2",     "Geometric mean FC across non-diabetic samples of the comparison."),
-    ("GeoMeanFC_Ratio",      "max(GeoMeanFC_Group1, GeoMeanFC_Group2) / min(GeoMeanFC_Group1, GeoMeanFC_Group2)"),
+    ("GeoMeanAR_Group1",     "Geometric mean AR across diabetic samples of the comparison."),
+    ("GeoMeanAR_Group2",     "Geometric mean AR across non-diabetic samples of the comparison."),
+    ("GeoMeanAR_Ratio",      "max(GeoMeanAR_Group1, GeoMeanAR_Group2) / min(GeoMeanAR_Group1, GeoMeanAR_Group2)"),
 ], columns=["_", "__"])
+
+COLUMN_RENAME = {
+    "FC_between_fractions": "AR_between_fractions",
+    "GeoMeanFC_Group1":     "GeoMeanAR_Group1",
+    "GeoMeanFC_Group2":     "GeoMeanAR_Group2",
+    "GeoMeanFC_Ratio":      "GeoMeanAR_Ratio",
+}
 
 with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
     README.to_excel(writer, sheet_name="README", index=False, header=False, startrow=2)
@@ -53,8 +60,9 @@ with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
             df   = pd.read_csv(path)
 
             for comp_key, comp_label in COMPARISONS.items():
-                subset     = df[df["Comparison"] == comp_key].drop(columns=["Comparison", "Comparison_Label"])
-                sheet_name = f"FC{fc} Stab{stab} {comp_label}"
+                subset     = df[df["Comparison"] == comp_key].drop(columns=["Comparison", "Comparison_Label"]) \
+                                                              .rename(columns=COLUMN_RENAME)
+                sheet_name = f"AR{fc} ΔAR{stab} {comp_label}"
                 subset.to_excel(writer, sheet_name=sheet_name, index=False)
                 print(f"  {sheet_name}: {len(subset)} validated DEPs")
 

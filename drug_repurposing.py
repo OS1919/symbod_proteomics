@@ -187,8 +187,8 @@ for fc in FC_THRESHOLDS:
                               for s in PROTEIN_SETS}
                     ref_row = set_dfs[PROTEIN_SETS[0]][set_dfs[PROTEIN_SETS[0]]['Drug'] == drug].iloc[0]
                     rows.append({
-                        'FC threshold':       fc,
-                        'Stability threshold': stab,
+                        'AR threshold':       fc,
+                        'ΔAR':                stab,
                         'Comparison':         comparison,
                         'Drug':               drug,
                         'DrugBank_ID':        ref_row['DrugBank_ID'],
@@ -230,8 +230,8 @@ if _supplement_rows:
         ("PCL scaffold", "Diabetic vs. non-diabetic, PCL scaffold."),
         ("",            ""),
         ("Column name", "Description"),
-        ("FC threshold",                       "Minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
-        ("Stability threshold",                "Minimum ratio of group-level geometric mean FCs required for a second-level DEP to be considered stable across groups."),
+        ("AR threshold",                       "Abundance ratio threshold: minimum comparison-level abundance ratio between fractions required to qualify a protein as a second-level DEP."),
+        ("ΔAR",                                "Stability threshold: minimum ratio of group-level geometric mean abundance ratios required for a second-level DEP to be considered stable across groups."),
         ("Drug",                               "Drug name."),
         ("DrugBank_ID",                        "DrugBank identifier."),
         ("Status",                             "Approval status (e.g. approved, investigational)."),
@@ -250,7 +250,7 @@ if _supplement_rows:
             subset = (
                 all_top[all_top['Comparison'] == comp_key]
                 .drop(columns='Comparison')
-                .sort_values(['FC threshold', 'Stability threshold', 'Mean score'],
+                .sort_values(['AR threshold', 'ΔAR', 'Mean score'],
                              ascending=[True, True, False])
                 .reset_index(drop=True)
             )
