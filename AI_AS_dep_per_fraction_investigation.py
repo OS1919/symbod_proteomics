@@ -106,7 +106,7 @@ gs = fig.add_gridspec(
     2, 2,
     width_ratios=[1, 1.55],
     left=0.05, right=0.70,
-    top=0.93, bottom=0.08,
+    top=0.87, bottom=0.08,
     hspace=0.30, wspace=0.28,
 )
 venn_axes = [fig.add_subplot(gs[i, 0]) for i in range(2)]
@@ -130,7 +130,6 @@ for ax, comp in zip(venn_axes, COMPARISONS):
     for lbl in v.set_labels:
         if lbl:
             lbl.set_fontsize(11)
-    ax.set_title(PANEL_LABELS[comp], fontsize=13, fontweight="bold", pad=6)
 
 
 # ── Panel (b): Category stacked bars ─────────────────────────────────────────
@@ -164,7 +163,6 @@ for ax, comp in zip(bar_axes, COMPARISONS):
 
     ax.set_xticks(CAT_X)
     ax.set_xticklabels([g[0] for g in CAT_GROUPS], fontsize=11)
-    ax.set_title(PANEL_LABELS[comp], fontsize=13, fontweight="bold", pad=10)
     ax.set_ylim(0, ylim_cat)
     ax.set_xlim(-0.5, 2.6)
     ax.spines[["top", "right"]].set_visible(False)
@@ -173,20 +171,29 @@ for ax, comp in zip(bar_axes, COMPARISONS):
     ax.set_ylabel("Number of DEPs", fontsize=12)
 
 
-# ── Panel labels (a) / (b) ────────────────────────────────────────────────────
+# ── Panel labels (a)(b)(c)(d) + row titles ────────────────────────────────────
+# Anchored to the gridspec cell geometry (not the rendered Axes bbox): venn2
+# applies aspect="equal", which shrinks the Venn axes box around its center,
+# so a title/label hung off that axes' own top edge drifts out of line with
+# the bar-chart title in the same row. The gridspec cell top is unaffected by
+# that shrink, so both columns line up exactly.
 fig.canvas.draw()
 renderer = fig.canvas.get_renderer()
 inv = fig.transFigure.inverted()
 
-label_y = max(
-    inv.transform((0, ax.get_window_extent(renderer).y1))[1]
-    for ax in [venn_axes[0], bar_axes[0]]
-) + 0.005
+row_labels = [("a", "b"), ("c", "d")]
 
-for ax, label in zip([venn_axes[0], bar_axes[0]], ["(a)", "(b)"]):
-    x = inv.transform((ax.get_window_extent(renderer).x0, 0))[0]
-    fig.text(x - 0.012, label_y, label,
-             fontsize=16, fontweight="bold", va="bottom", ha="right")
+for i, comp in enumerate(COMPARISONS):
+    pos_venn = gs[i, 0].get_position(fig)
+    pos_bar  = gs[i, 1].get_position(fig)
+    row_top  = pos_venn.y1  # == pos_bar.y1, same gridspec row
+
+    for pos, label in zip((pos_venn, pos_bar), row_labels[i]):
+        x_center = (pos.x0 + pos.x1) / 2
+        fig.text(x_center, row_top + 0.006, PANEL_LABELS[comp],
+                  fontsize=13, fontweight="bold", ha="center", va="bottom")
+        fig.text(pos.x0 - 0.012, row_top + 0.032, f"({label})",
+                  fontsize=16, fontweight="bold", ha="right", va="bottom")
 
 
 # ── Legend for panel (b) ──────────────────────────────────────────────────────
