@@ -504,17 +504,19 @@ print(p_heat_post_norm)
 
 ## Scaling
 ```{r}
-scale_se <- function(se_data){
-  
+scale_se <- function(se_data, methods){
+
   # Get initial count
   initial_samples <- ncol(se_data)
   cat(sprintf("Initial number of samples: %d\n", initial_samples))
-  
+
   # Convert column data from SummarizedExperiment to a data table for manipulation
   coldata <- as.data.table(colData(se_data))
 
-  # Iterate over each assay in the SummarizedExperiment object
-  for(ain in names(assays(se_data))){
+  # Iterate only over the intended normalized assays (e.g. "log2" must not be
+  # scaled and dropped here - it is still needed elsewhere as-is), regardless
+  # of what other assays happen to be present on se_data
+  for(ain in methods){
     
     # Convert the current assay to a data frame for processing
     dt <- as.data.frame(assays(se_data)[[ain]])
@@ -614,7 +616,7 @@ scale_se <- function(se_data){
 
 
 ```{r perform and visualize scaling}
-se_scaled <- scale_se(se_normalized)
+se_scaled <- scale_se(se_normalized, normalization_methods)
 
 if (!is.null(final_out_dir)){
   # Create the scaled assay names (they now have "_scaled" suffix)
