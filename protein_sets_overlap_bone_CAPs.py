@@ -32,9 +32,17 @@ BAR_WIDTH  = 0.22
 GROUP_GAP  = 0.08
 
 # Load data that is shared across all threshold combinations
-ai_de     = pd.read_csv("de_analysis_results_AI_RobNorm_scaled/de_results_raw.csv")
-as_de     = pd.read_csv("de_analysis_results_AS_RobNorm_scaled/de_results_raw.csv")
+ai_de     = pd.read_csv("de_analysis_results_AI_RobNorm_scaled/de_results_raw_with_orthologs.csv")
+as_de     = pd.read_csv("de_analysis_results_AS_RobNorm_scaled/de_results_raw_with_orthologs.csv")
 bone_caps = set(pd.read_csv("input/bone_caps_meta_analysis.csv")["Gene"].dropna().str.upper())
+
+
+def human_orthologs(ortholog_strings):
+    """Set of human gene symbols named by a column of ';'-separated ortholog lists."""
+    out = set()
+    for s in pd.Series(ortholog_strings).dropna().astype(str):
+        out |= {g.strip().upper() for g in s.split(";") if g.strip()}
+    return out
 
 # Collect results for supplement export
 _results = []
@@ -68,10 +76,20 @@ for fc in FC_THRESHOLDS:
             row = summary.loc[comp_key]
 
             # Total proteome size = all proteins tested in either fraction for this comparison
-            ai_prots = set(ai_de[ai_de["Comparison"] == comp_key]["Protein.IDs"].dropna())
-            as_prots = set(as_de[as_de["Comparison"] == comp_key]["Protein.IDs"].dropna())
+            ai_comp  = ai_de[ai_de["Comparison"] == comp_key]
+            as_comp  = as_de[as_de["Comparison"] == comp_key]
+            ai_prots = set(ai_comp["Protein.IDs"].dropna())
+            as_prots = set(as_comp["Protein.IDs"].dropna())
             M = len(ai_prots | as_prots)       # population size
             n = int(row["Bone_Caps_Tested"])   # successes in population
+
+            # Human genes represented by the tested proteome, used below to decide
+            # which connector proteins are genuinely new members of the population.
+            tested_genes = human_orthologs(
+                pd.concat([ai_comp[["Protein.IDs", "Orthologs"]],
+                           as_comp[["Protein.IDs", "Orthologs"]]])
+                  .drop_duplicates("Protein.IDs")["Orthologs"]
+            )
 
             # Set 1: tissue-level DEPs (first-level + second-level combined)
             s1 = int(row["Validated_Both_Fractions"] + row["Validated_Exclusive"] + row["Validated_Second_Level"])
@@ -79,12 +97,21 @@ for fc in FC_THRESHOLDS:
             # hypergeom.sf(k, M, n, N) with n the number of successes in M and N the number of draws
             p1 = hypergeom.sf(o1 - 1, M, n, s1)
 
-            # Set 2: tissue-level DEPs + connector proteins (from both-levels network)
+            # Set 2: tissue-level DEPs + connector proteins (from both-levels network).
+            # Connectors come from the human interactome, so most of them are not
+            # members of the tested proteome. Adding them to the draw without also
+            # adding them to the population would make the draw exceed what the
+            # population can supply, so the population grows by the connectors that
+            # are genuinely new (and its successes by any bone-healing reference
+            # protein among them).
             exc_path  = os.path.join(NET_DIR, comp_key, "both_levels", "exception_proteins.csv")
             exc_prots = set(pd.read_csv(exc_path)["Gene"].dropna().str.upper())
+            new_conn  = exc_prots - tested_genes
+            M2 = M + len(new_conn)
+            n2 = n + len((exc_prots & bone_caps) - tested_genes)
             s2 = s1 + len(exc_prots)
             o2 = o1 + len(exc_prots & bone_caps)
-            p2 = hypergeom.sf(o2 - 1, M, n, s2)
+            p2 = hypergeom.sf(o2 - 1, M2, n2, s2)
 
             # Set 3: first-level DEPs only
             s3 = int(row["Validated_Both_Fractions"] + row["Validated_Exclusive"])
@@ -100,39 +127,41 @@ for fc in FC_THRESHOLDS:
             assert len(cd) == s1, (
                 f"{comp_key}: tissue-level DEP count mismatch — file={len(cd)}, summary={s1}"
             )
-            first_lvl  = set(cd.loc[first_mask, "Gene.Names"].str.upper())
-            tissue_lvl = set(cd["Gene.Names"].str.upper())
+            # Cross-comparison "shared" bars are computed on human gene symbols so
+            # that DEPs (measured as rat proteins) and connectors (human interactome
+            # genes) live in one namespace; upper-casing the rat symbols instead
+            # would match the two only by spelling coincidence.
+            first_lvl  = human_orthologs(cd.loc[first_mask, "Orthologs"])
+            tissue_lvl = human_orthologs(cd["Orthologs"])
             _gene_sets[comp_key] = [first_lvl, tissue_lvl, tissue_lvl | exc_prots]
 
             PROTEIN_N[comp_label]     = [s3, s1, s2]
             protein_pvals[comp_label] = [p3, p1, p2]
 
-            expected1 = round((s1 * n) / M, 2) if M > 0 else 0
-            expected2 = round((s2 * n) / M, 2) if M > 0 else 0
-            expected3 = round((s3 * n) / M, 2) if M > 0 else 0
-
-            for set_label, s, o, expected, p in [
-                ("Tissue-level DEPs",                    s1, o1, expected1, p1),
-                ("Tissue-level DEPs + connector proteins", s2, o2, expected2, p2),
-                ("First-level DEPs",                     s3, o3, expected3, p3),
+            for set_label, pop, succ, s, o, p in [
+                ("Tissue-level DEPs",                     M,  n,  s1, o1, p1),
+                ("Tissue-level DEPs + connector proteins", M2, n2, s2, o2, p2),
+                ("First-level DEPs",                      M,  n,  s3, o3, p3),
             ]:
+                expected = round((s * succ) / pop, 2) if pop > 0 else 0
                 _results.append({
                     "AR threshold":             fc,
                     "ΔAR":                      stab,
                     "Comparison":               comp_label,
                     "Protein set":              set_label,
-                    "Proteome size (M)":        M,
-                    "Bone-healing reference proteins in proteome (n)": n,
+                    "Proteome size (M)":        pop,
+                    "Bone-healing reference proteins in proteome (n)": succ,
                     "Protein set size (N)":     s,
                     "Bone-healing reference protein overlap (k)":    o,
                     "Expected overlap":         expected,
                     "p-value":                  p,
                 })
 
-            print(f"\n{comp_label}:")
-            print(f"  Tissue-level DEPs                  n={s1:>4}  overlap={o1:>3}  p={p1:.3e}")
-            print(f"  Tissue-level DEPs + connectors     n={s2:>4}  overlap={o2:>3}  p={p2:.3e}")
-            print(f"  First-level DEPs only              n={s3:>4}  overlap={o3:>3}  p={p3:.3e}")
+            print(f"\n{comp_label}:  population M={M} (successes n={n})")
+            print(f"  Tissue-level DEPs                  N={s1:>4}  overlap={o1:>3}  p={p1:.3e}")
+            print(f"  Tissue-level DEPs + connectors     N={s2:>4}  overlap={o2:>3}  p={p2:.3e}"
+                  f"   [population expanded to M={M2} by {len(new_conn)} new connectors]")
+            print(f"  First-level DEPs only              N={s3:>4}  overlap={o3:>3}  p={p3:.3e}")
 
         # ── Shared proteins (intersection between comparisons) ────────────────
 

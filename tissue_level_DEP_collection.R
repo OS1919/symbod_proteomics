@@ -429,10 +429,18 @@ for (fc_thresh in fc_thresholds) {
     summary_stats <- data.frame()
     
     for (comp in names(comparisons_of_interest)) {
-      tested_orthologs_ai <- de_results_AI[de_results_AI$Comparison == comp, "Orthologs"]
-      tested_orthologs_as <- de_results_AS[de_results_AS$Comparison == comp, "Orthologs"]
-      all_tested_orthologs <- unique(c(tested_orthologs_ai, tested_orthologs_as))
-      bone_caps_tested <- sum(any_ortholog_in(all_tested_orthologs, meta_genes), na.rm = TRUE)
+      # Bone-healing reference proteins among the proteins tested for DE in either
+      # fraction. This is the "successes in the population" term of the downstream
+      # hypergeometric test, so it must be counted in the same unit as the
+      # population itself (distinct Protein.IDs) and as the draw (validated DEP
+      # rows). De-duplicating on the Orthologs *string* instead would collapse
+      # distinct proteins that happen to share an ortholog list and undercount it.
+      tested_proteins <- rbind(
+        de_results_AI[de_results_AI$Comparison == comp, c("Protein.IDs", "Orthologs")],
+        de_results_AS[de_results_AS$Comparison == comp, c("Protein.IDs", "Orthologs")]
+      )
+      tested_proteins <- tested_proteins[!duplicated(tested_proteins$Protein.IDs), ]
+      bone_caps_tested <- sum(any_ortholog_in(tested_proteins$Orthologs, meta_genes), na.rm = TRUE)
       
       deps_ai_count <- sum(de_results_AI$Comparison == comp & de_results_AI$Change != "No Change")
       deps_as_count <- sum(de_results_AS$Comparison == comp & de_results_AS$Change != "No Change")
