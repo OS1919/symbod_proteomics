@@ -461,33 +461,6 @@ for (p in list(p1, p2)){
 }
 ```
 
-### Quantitative Evaluation
-In this segment, we assess the intragroup correlation across normalization methods using the diabetic and non-diabetic condition groups. Intragroup correlation measures how consistently samples within the same condition group behave — higher correlation indicates better within-group reproducibility after normalization. We use PRONE's `plot_intragroup_correlation` for a visual comparison across methods, and additionally compute pairwise Pearson correlation statistics (mean ± SD) per condition group and method for a numeric summary.
-
-```{r}
-plotted_methods = c(normalization_methods, "log2")
-```
-
-### Intragroup Correlation by Condition
-```{r intragroup_correlation}
-p_intra_corr <- plot_intragroup_correlation(
-  se_normalized,
-  ain = plotted_methods,
-  condition = "Condition",
-  method = "pearson"
-)
-
-if(save_plots && !is.null(final_out_dir)){
-  sub_dir <- paste0(file.path(final_out_dir,"post_normalization_pre_scaling"))
-  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
-
-  save_png(filename = file.path(sub_dir, "intragroup_correlation_condition.png"), p = p_intra_corr)
-}
-
-print(p_intra_corr)
-```
-
-
 ### Print heatmap after normalization and before scaling
 ```{r}
 p_heat_post_norm <- plot_heatmap(se = se_normalized, ain = "RobNorm", color_by = c("Condition", "Scaffold"), label_by = "Animal")

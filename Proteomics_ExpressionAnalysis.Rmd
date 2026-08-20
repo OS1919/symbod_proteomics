@@ -26,15 +26,14 @@ library(org.Hs.eg.db)
 ```{r config}
 fraction_to_analyze <- "AS"  # Set to "AI" or "AS"
 
-prot_file <- file.path(paste0("normalization_results_", fraction_to_analyze), 
-                       "scaled", 
-                       "RobNorm_scaled_normalized_data.csv")
-
-meta_file <- file.path(paste0("normalization_results_", fraction_to_analyze), 
-                       "scaled", 
-                       "meta_data.csv")
-
 primary_norm_method <- "RobNorm_scaled"
+
+# Additional normalization, run alongside the primary one purely as a diagnostic
+diagnostic_norm_methods <- c("LoessF_scaled")
+
+norm_dir  <- file.path(paste0("normalization_results_", fraction_to_analyze), "scaled")
+prot_file <- file.path(norm_dir, paste0(primary_norm_method, "_normalized_data.csv"))
+meta_file <- file.path(norm_dir, "meta_data.csv")
 
 save_plots <- TRUE
 
@@ -78,6 +77,15 @@ se <- load_data(data = prot_data, md = md,
 assays(se)[["log2"]] <- NULL
 # Rename the "raw" assay to "normalized"
 names(assays(se))[names(assays(se)) == "raw"] <- primary_norm_method
+
+# Attach the diagnostic assays, matched on Protein.IDs rather than assumed to be
+# row-aligned.
+for (m in diagnostic_norm_methods) {
+  d <- data.table::fread(file.path(norm_dir, paste0(m, "_normalized_data.csv")))
+  assay(se, m, FALSE) <- as.matrix(d[match(rowData(se)$Protein.IDs, d$Protein.IDs),
+                                     colnames(se), with = FALSE])
+}
+
 cat("Available assays in the SummarizedExperiment object:\n")
 print(names(assays(se)))
 ```
@@ -148,6 +156,12 @@ colData(se) <- col_data
 selected_comparisons <- c(
   "diabetic_empty_42-nondiabetic_empty_42",
   "diabetic_PCL_42-nondiabetic_PCL_42"
+)
+
+# Display names for figures
+comparison_labels <- c(
+  "diabetic_empty_42-nondiabetic_empty_42" = "Empty bone defect",
+  "diabetic_PCL_42-nondiabetic_PCL_42"     = "PCL scaffold"
 )
 ```
 
@@ -234,7 +248,9 @@ filter_proteins_by_group <- function(se, comparison, condition_column, min_sampl
 # NOTE: Protein filtering is performed independently for each comparison
 # A protein is included in analysis if it has ≥3 non-NA values in BOTH groups
 # This means different comparisons may test different numbers of proteins
-run_DE_with_filtering <- function(se, comparisons, condition_column, min_samples = 3, assay_to_use = NULL) {
+# `extra_assays` are additional assays limma is also run on, for the diagnostic only.
+run_DE_with_filtering <- function(se, comparisons, condition_column, min_samples = 3,
+                                  assay_to_use = NULL, extra_assays = character(0)) {
   all_results <- data.frame()
   filtered_proteins_per_comparison <- list()
   
@@ -253,7 +269,7 @@ run_DE_with_filtering <- function(se, comparisons, condition_column, min_samples
     # Run DE analysis on filtered data
     de_result <- run_DE(se = se_filtered, 
                        comparisons = comparison,  # Single comparison
-                       ain = assay_to_use,
+                       ain = c(assay_to_use, extra_assays),
                        condition = condition_column,
                        DE_method = "limma",
                        logFC = TRUE, 
@@ -275,12 +291,16 @@ de_results_container <- run_DE_with_filtering(
   comparisons = selected_comparisons,
   condition_column = "Cond_Scaffold_Time",
   min_samples = 3,
-  assay_to_use = primary_norm_method
+  assay_to_use = primary_norm_method,
+  extra_assays = diagnostic_norm_methods
 )
 
 # Extract results and filtered protein info
-de_results <- de_results_container$results
+de_results_all <- de_results_container$results
 filtered_proteins_per_comparison <- de_results_container$filtered_proteins
+
+# Everything downstream sees the primary assay alone
+de_results <- de_results_all[de_results_all$Assay == primary_norm_method, ]
 ```
 
 ## Visualize Results
@@ -381,4 +401,44 @@ cat("DEPs per comparison:\n")
 deps_per_comparison <- table(de_results_sig$Comparison)
 print(deps_per_comparison)
 cat("\n")
+```
+
+## Normalization diagnostic
+Placed last so that a failure here cannot withhold the results saved above.
+
+```{r normalization_diagnostic, warning=FALSE, message=FALSE}
+# The protein filter is derived from the primary assay alone, so the assays are
+# only comparable if they share its missing-value pattern. Where they do not,
+# limma silently returns NA for the proteins it cannot estimate in the other
+# assay, PRONE counts those as "No Change", and the overlap below comes out too
+# low with nothing to show for it.
+for (m in diagnostic_norm_methods) {
+  n_mismatch <- sum(is.na(as.matrix(assays(se)[[m]])) !=
+                    is.na(as.matrix(assays(se)[[primary_norm_method]])))
+  if (n_mismatch > 0)
+    stop(sprintf("Assay '%s' differs from '%s' in %d missing values, so their DE ",
+                 m, primary_norm_method, n_mismatch),
+         "results are not computed on the same proteins and cannot be compared.")
+}
+
+p_jaccard <- plot_jaccard_heatmap(de_results_all,
+                                  ain = c(primary_norm_method, diagnostic_norm_methods),
+                                  comparisons = selected_comparisons, plot_type = "facet_comp") +
+  ggplot2::scale_fill_gradient(low = "white", high = "#0072B2", limits = c(0, 1)) +
+  ggplot2::facet_wrap(~Comparison, scales = "free",
+                      labeller = ggplot2::as_labeller(comparison_labels))
+print(p_jaccard)
+if (save_plots) {
+  ggsave(file.path(final_out_dir, "normalization_diagnostic_jaccard.png"),
+         p_jaccard, width = 8, height = 4)
+}
+
+print(p_jaccard$data)
+
+# Jaccard measures set overlap only. A protein could be shared yet called in
+# opposite directions, which overlap alone would hide.
+sig <- de_results_all[de_results_all$Change != "No Change", ]
+cat("Proteins called in opposite directions by the two normalizations:",
+    sum(tapply(sig$Change, paste(sig$Comparison, sig$Protein.IDs),
+               function(x) length(unique(x)) > 1)), "\n")
 ```
