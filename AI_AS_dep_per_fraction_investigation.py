@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.font_manager import FontProperties
 from matplotlib_venn import venn2
+from matplotlib.transforms import offset_copy
 
 OUT_DIR        = "ai_as_proteome_investigation_results"
 VALIDATION_DIR = "valid_DEPs/FC5.59_Stab1.2"
@@ -91,6 +92,24 @@ def compute_breakdown(comp):
     return d
 
 
+def label_venn_with_percentages(v, counts, ax, fontsize=13, pct_fontsize=11.5):
+    """Label each venn2 subset with its size plus, on a smaller second line, its
+    share of the union of both sets (i.e. of all three subset counts)."""
+    total = sum(counts)
+    if total == 0:
+        return
+    for subset_id, n in zip(("10", "01", "11"), counts):
+        lbl = v.get_label_by_id(subset_id)
+        if lbl is None:
+            continue
+        lbl.set_fontsize(fontsize)
+        base = lbl.get_transform()
+        lbl.set_transform(offset_copy(base, fig=ax.figure, y=5, units="points"))
+        ax.text(*lbl.get_position(), f"({n / total:.1%})",
+                transform=offset_copy(base, fig=ax.figure, y=-5, units="points"),
+                ha="center", va="top", fontsize=pct_fontsize)
+
+
 all_data = {comp: compute_breakdown(comp) for comp in COMPARISONS}
 
 ylim_cat = max(
@@ -123,10 +142,7 @@ for ax, comp in zip(venn_axes, COMPARISONS):
         set_colors=(COLOR_AI, COLOR_AS),
         alpha=0.55, ax=ax,
     )
-    for sid in ("10", "01", "11"):
-        lbl = v.get_label_by_id(sid)
-        if lbl:
-            lbl.set_fontsize(13)
+    label_venn_with_percentages(v, (d["ai_only"], d["as_only"], d["shared"]), ax)
     for lbl in v.set_labels:
         if lbl:
             lbl.set_fontsize(11)

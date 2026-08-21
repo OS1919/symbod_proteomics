@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib_venn import venn2
+from matplotlib.transforms import offset_copy
 from scipy.stats import pearsonr
 
 OUT_DIR = "ai_as_proteome_investigation_results"
@@ -60,6 +61,24 @@ def detected_proteins(df, sample_names):
     return set(df.loc[df[cols].notna().any(axis=1), "Protein.IDs"])
 
 
+def label_venn_with_percentages(v, counts, ax, fontsize=13, pct_fontsize=11.5):
+    """Label each venn2 subset with its size plus, on a smaller second line, its
+    share of the union of both sets (i.e. of all three subset counts)."""
+    total = sum(counts)
+    if total == 0:
+        return
+    for subset_id, n in zip(("10", "01", "11"), counts):
+        lbl = v.get_label_by_id(subset_id)
+        if lbl is None:
+            continue
+        lbl.set_fontsize(fontsize)
+        base = lbl.get_transform()
+        lbl.set_transform(offset_copy(base, fig=ax.figure, y=5, units="points"))
+        ax.text(*lbl.get_position(), f"({n / total:.1%})",
+                transform=offset_copy(base, fig=ax.figure, y=-5, units="points"),
+                ha="center", va="top", fontsize=pct_fontsize)
+
+
 # ── Figure layout: outer 1×2, inner 2×2 for Venns ────────────────────────────
 fig = plt.figure(figsize=(12, 6))
 outer_gs = fig.add_gridspec(
@@ -93,17 +112,15 @@ for ax_v, (genotype, scaffold, title), color in zip(venn_axes, GROUPS, GROUP_COL
     det_ai  = detected_proteins(ai_df, ai_cols)
     det_as  = detected_proteins(as_df, as_cols)
 
-    v = venn2([det_ai, det_as], set_labels=None,
-              set_colors=(COLOR_AI, COLOR_AS), alpha=ALPHA, ax=ax_v)
-    for subset_id in ('10', '01', '11'):
-        lbl = v.get_label_by_id(subset_id)
-        if lbl:
-            lbl.set_fontsize(13)
-    ax_v.set_title(title, fontsize=14, color="black", pad=2)
-
     ai_only = det_ai - det_as
     as_only = det_as - det_ai
     both    = det_ai & det_as
+
+    v = venn2([det_ai, det_as], set_labels=None,
+              set_colors=(COLOR_AI, COLOR_AS), alpha=ALPHA, ax=ax_v)
+    label_venn_with_percentages(v, (len(ai_only), len(as_only), len(both)), ax_v)
+    ax_v.set_title(title, fontsize=14, color="black", pad=2)
+
     both_sets.append(both)
     group_tables[title] = {"ai_only": ai_only, "as_only": as_only, "both": both}
     print(f"{title}: AI-only={len(ai_only)}, AS-only={len(as_only)}, both={len(both)}")
